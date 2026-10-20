@@ -1,0 +1,33 @@
+<?php
+
+namespace App\Enums;
+
+// app/Enums/{{EntityName}}{{Aspect}}.php  (например, TariffStatus, TariffType)
+//
+// Фиксированный набор значений живёт ЗДЕСЬ, а не в БД:
+//   • миграция: $table->string('{{aspect}}')            — НЕ $table->enum(...)
+//   • модель:   '{{aspect}}' => {{EntityName}}{{Aspect}}::class   в casts()
+//   • запрос:   new Enum({{EntityName}}{{Aspect}}::class)
+//   • код:      {{EntityName}}{{Aspect}}::ACTIVE, сравнение по ->value — никаких сырых строк 'active'
+// Новое значение = новый case, без миграции.
+enum {{EntityName}}{{Aspect}}: string
+{
+    case ACTIVE = 'active';
+    case ARCHIVED = 'archived';
+
+    // РЕШЕНИЕ: группы значений и правила о значениях — методы enum'а, а не массивы строк в сервисах
+    /**
+     * @return array<int, self>
+     */
+    public static function visibleStatuses(): array
+    {
+        return [
+            self::ACTIVE,
+        ];
+    }
+
+    public function isFinal(): bool
+    {
+        return $this->value === self::ARCHIVED->value;
+    }
+}

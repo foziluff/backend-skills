@@ -78,7 +78,30 @@ Route::patch('languages/{code}', [LanguageController::class, 'update'])->where('
   в коде — `config('custom.ws_server_url')`. *Почему:* при `config:cache` `env()` вне конфигов возвращает `null`.
 - Новые проектные настройки добавляются в `config/custom.php`, а в `.env.example` — в блок `#CUSTOM#…`.
 
-## Enum
+<a id="enum"></a>
+## Enum и запрет сырых строк **[подтверждено]**
+
+Принцип автора: **максимально избегать сырых строк в коде.** Любое значение из фиксированного набора — enum,
+любой повторяющийся технический идентификатор — константа. Набор значений живёт в коде, а не в БД
+(колонка `string`, без `$table->enum()`), чтобы новое значение добавлялось одним `case` без миграции.
+
+| ❌ Сырая строка (legacy в проекте) | ✅ Как надо |
+|---|---|
+| `$user->role !== $role` (`RoleMiddleware`, `role` без каста) | каст `'role' => Role::class` в `User`, сравнение `$user->role?->value !== $role` |
+| `match ($action) { 'BootNotification' => ... }` (`OCPPService`) | `match (OCPPAction::tryFrom($action)) { OCPPAction::BOOT_NOTIFICATION => ... }` |
+| `in_array($status, ['Preparing', 'Charging', ...])` (`OCPPService::handleStatusNotification`) | enum `OCPPConnectorStatus` с методом `isPluggedIn(): bool` |
+| `$measurand === 'Energy.Active.Import.Register'` (`OCPPService::handleMeterValues`) | enum `OCPPMeasurand::ENERGY_ACTIVE_IMPORT_REGISTER` |
+| `['status' => 'Accepted']`, `'Invalid'` (`OCPPService`, `OCPPCommandRepository`) | enum `OCPPResponseStatus::ACCEPTED->value` |
+| `'event' => 'UserUpdated'`, `'ActiveSessions'` (`MobileCommandRepository`) | enum `MobileEvent::USER_UPDATED->value` |
+| `Log::channel('charging')` в 8 местах | константа/enum канала (например, `LogChannel::CHARGING->value`) |
+| `$phone == '999999999'` (`UserService::sendCode`) | не нужно вовсе (это dev-обход) или константа из конфига |
+
+(Имена enum'ов в правой колонке — предложение; таких классов в проекте пока нет.)
+
+Не считаются «сырыми строками»: имена колонок и связей в запросах, ключи переводов (`'all.connector_busy'`),
+ключи массивов ответа/конфига, тексты логов.
+
+### Устройство enum
 
 ```php
 enum ChargingSessionStatus: string

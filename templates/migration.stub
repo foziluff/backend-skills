@@ -17,7 +17,9 @@ return new class extends Migration
             // РЕШЕНИЕ: типы колонок
             //   деньги          → $table->decimal('price', 36, 2);
             //   энергия/счётчик → $table->unsignedBigInteger('watts');
-            //   статус/тип      → $table->string('status');            // + backed enum в app/Enums
+            //   статус/тип/роль → $table->string('status');            // + backed enum в app/Enums (templates/enum.stub)
+            //                     НИКОГДА $table->enum(): набор значений живёт в коде, новое значение — без миграции
+            //                     дефолт — из enum: ->default({{EntityName}}Status::ACTIVE->value)
             //   флаг            → $table->boolean('is_active')->default(false);
             //   момент времени  → $table->timestamp('started_at')->nullable();
             //   переводимые поля (name, address…) колонками НЕ создаются — они в таблице translations

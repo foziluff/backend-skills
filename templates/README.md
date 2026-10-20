@@ -17,13 +17,15 @@
 | `{{Verb}}` / `{{verb}}` | `Stop` / `stop` |
 | `{{Problem}}` / `{{problem}}` | `LimitReached` / `limit_reached` |
 | `{{YYYY_MM_DD_HHMMSS}}` | `2026_10_20_120000` |
+| `{{Aspect}}` / `{{aspect}}` | `Status` / `status` |
 
 ## Порядок создания нового CRUD
 
 | # | Файл | Шаблон |
 |---|---|---|
 | 1 | `database/migrations/…_create_{{entity_names}}_table.php` | [migration.stub](migration.stub) |
-| 2 | `app/Models/{{EntityName}}.php` (+ enum в `app/Enums`, если есть статус) | [model.stub](model.stub) |
+| 2 | `app/Models/{{EntityName}}.php` | [model.stub](model.stub) |
+| 2a | `app/Enums/{{EntityName}}{{Aspect}}.php` — для **каждого** поля с фиксированным набором значений (статус, тип, роль) | [enum.stub](enum.stub) |
 | 3 | `database/factories/{{EntityName}}Factory.php` | [factory.stub](factory.stub) |
 | 4 | `database/seeders/{{EntityName}}Seeder.php` + регистрация в `DatabaseSeeder::run()` в порядке зависимостей | — (по образцу `CompanySeeder`) |
 | 5 | `app/Exceptions/{{EntityName}}NotFoundException.php` (+ бизнес-ошибки) | [exception.stub](exception.stub) |

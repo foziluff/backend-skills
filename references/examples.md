@@ -1,6 +1,6 @@
 # Эталонные примеры с разбором
 
-Все фрагменты, кроме примера 8, взяты из проекта; путь указан над каждым.
+Все фрагменты, кроме целевого кода в примере 8 и примера 9, взяты из проекта; путь указан над каждым.
 Места, где реальный код расходится с целевым правилом, помечены **legacy → как надо**.
 
 ---
@@ -508,8 +508,79 @@ class UpdatePointRequest extends FormRequest
 
 ---
 
+## 8. Фиксированные значения: enum вместо сырых строк
+
+`app/Services/OCPPService.php::handleStatusNotification` (legacy)
+```php
+$status = $payload['status'] ?? '';
+// ...
+$isPluggedIn = in_array($status, ['Preparing', 'Charging', 'SuspendedEV', 'SuspendedEVSE', 'Finishing']);
+$this->connectorRepository->update($connector->id, ['is_connected' => $isPluggedIn]);
+// ...
+if ($status === 'Charging') {
+    // ...
+} elseif (in_array($status, ['Finishing', 'Available', 'Faulted'])) {
+    // ...
+}
+```
+
+Как надо — набор значений и правило о нём живут в enum:
+```php
+// app/Enums/OCPPConnectorStatus.php
+enum OCPPConnectorStatus: string
+{
+    case AVAILABLE = 'Available';
+    case PREPARING = 'Preparing';
+    case CHARGING = 'Charging';
+    case SUSPENDED_EV = 'SuspendedEV';
+    case SUSPENDED_EVSE = 'SuspendedEVSE';
+    case FINISHING = 'Finishing';
+    case FAULTED = 'Faulted';
+
+    public function isPluggedIn(): bool
+    {
+        return in_array($this, [self::PREPARING, self::CHARGING, self::SUSPENDED_EV, self::SUSPENDED_EVSE, self::FINISHING], true);
+    }
+
+    public function stopsSession(): bool
+    {
+        return in_array($this, [self::FINISHING, self::AVAILABLE, self::FAULTED], true);
+    }
+}
+
+// app/Services/OCPPService.php
+$status = OCPPConnectorStatus::tryFrom($payload['status'] ?? '');
+if (! $status) {
+    return [];
+}
+
+$this->connectorRepository->update($connector->id, ['is_connected' => $status->isPluggedIn()]);
+
+if ($status->value === OCPPConnectorStatus::CHARGING->value) {
+    // ...
+} elseif ($status->stopsSession()) {
+    // ...
+}
+```
+
+Разбор:
+- **Одна точка истины:** список «кабель вставлен» и «сессию пора остановить» объявлен один раз, в enum, рядом со значениями.
+- **Новое значение = новый `case`.** Миграция, ALTER и поиск строки по коду не нужны (enum в коде, колонка `string`).
+- **Опечатка ловится статически:** `OCPPConnectorStatus::CHARGNG` — ошибка Larastan, а `'Chargng'` молча вернёт `false`.
+- **Неизвестное значение от железа обрабатывается явно** (`tryFrom` → `null` → ранний return), а не уходит в «ни одна ветка не сработала».
+- Сравнение — по `->value` (правило автора).
+
+### ❌ Как НЕ надо
+```php
+if ($user->role == 'admin') { ... }                        // сырая строка, нестрогое сравнение, нет каста
+$table->enum('status', ['pending', 'charging']);           // набор значений в БД: новое значение = ALTER на проде
+'event' => 'UserUpdated'                                    // имя события строкой в трёх местах
+```
+
+---
+
 <a id="example-test"></a>
-## 8. Feature-тест (эталон — в проекте тестов пока нет)
+## 9. Feature-тест (эталон — в проекте тестов пока нет)
 
 `tests/Feature/ChargingSession/StoreChargingSessionTest.php`
 ```php

@@ -7,6 +7,7 @@ use Illuminate\Contracts\Pagination\CursorPaginator;
 
 // Репозиторий: только чтение/запись. Возвращает ?Model | bool | int | Collection | Paginator.
 // НЕ бросает доменные исключения, НЕ принимает бизнес-решений.
+// Максимально тупой: никаких бизнес-if, __(), выбора языка/получателя, бизнес-сортировки — это всё в сервисе.
 readonly class {{EntityName}}Repository
 {
     public function cursorPaginateBy{{ParentName}}Id(int ${{parentName}}Id): CursorPaginator
