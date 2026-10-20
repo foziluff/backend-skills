@@ -1,0 +1,14 @@
+<?php
+
+// app/Exceptions/{{EntityName}}{{Problem}}Exception.php
+// {{Problem}}: NotFound | AlreadyExists | LimitReached | Busy | Offline | Rejected | …
+
+namespace App\Exceptions;
+
+use RuntimeException;
+
+class {{EntityName}}{{Problem}}Exception extends RuntimeException {}
+
+// После создания ОБЯЗАТЕЛЬНО:
+//   1) строка в match в bootstrap/app.php — см. templates/exception-mapping.stub
+//   2) ключ '{{entity_name}}_{{problem}}' в lang/ru/all.php, lang/tg/all.php, lang/en/all.php

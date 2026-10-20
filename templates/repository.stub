@@ -1,0 +1,86 @@
+<?php
+
+namespace App\Repositories;
+
+use App\Models\{{EntityName}};
+use Illuminate\Contracts\Pagination\CursorPaginator;
+
+// Репозиторий: только чтение/запись. Возвращает ?Model | bool | int | Collection | Paginator.
+// НЕ бросает доменные исключения, НЕ принимает бизнес-решений.
+readonly class {{EntityName}}Repository
+{
+    public function cursorPaginateBy{{ParentName}}Id(int ${{parentName}}Id): CursorPaginator
+    {
+        return {{EntityName}}::where('{{parent_id}}', ${{parentName}}Id)
+            ->select({{EntityName}}::DEFAULT_SELECT_COLUMNS)
+            // РЕШЕНИЕ: связи только с select через замыкание:
+            // ->with(['{{parentName}}' => fn (Relation $query) => $query->select({{ParentName}}::DEFAULT_SELECT_COLUMNS)])
+            ->latest('id')
+            ->cursorPaginate(20);
+    }
+
+    public function findById(int $id, bool $lockForUpdate = false): ?{{EntityName}}
+    {
+        $query = {{EntityName}}::where('id', $id)
+            ->select({{EntityName}}::DEFAULT_SELECT_COLUMNS);
+
+        if ($lockForUpdate) {
+            $query->lockForUpdate();
+        }
+
+        return $query->first();
+    }
+
+    public function create(array $data): {{EntityName}}
+    {
+        return {{EntityName}}::create($data);
+
+        // РЕШЕНИЕ: если есть переводы — несколько записей → своя транзакция и перечитывание:
+        // return transaction(function () use ($data) {
+        //     ${{entityName}} = {{EntityName}}::create($data);
+        //     ${{entityName}}->syncTranslations($data);
+        //
+        //     return $this->findById(${{entityName}}->id);
+        // });
+    }
+
+    public function update(int $id, array $data): ?{{EntityName}}
+    {
+        return transaction(function () use ($id, $data) {
+            ${{entityName}} = {{EntityName}}::where('id', $id)->lockForUpdate()->first();
+            if (! ${{entityName}}) {
+                return null;
+            }
+            ${{entityName}}->update($data);
+
+            return $this->findById(${{entityName}}->id);
+        });
+    }
+
+    public function softDelete(int $id): bool
+    {
+        return {{EntityName}}::where('id', $id)->delete();
+    }
+
+    public function existsById(int $id, bool $lockForUpdate = false): bool
+    {
+        $query = {{EntityName}}::where('id', $id);
+
+        if ($lockForUpdate) {
+            $query->lockForUpdate();
+        }
+
+        return $query->exists();
+    }
+
+    public function countBy{{ParentName}}Id(int ${{parentName}}Id, bool $lockForUpdate = false): int
+    {
+        $query = {{EntityName}}::where('{{parent_id}}', ${{parentName}}Id);
+
+        if ($lockForUpdate) {
+            $query->lockForUpdate();
+        }
+
+        return $query->count();
+    }
+}

@@ -1,0 +1,38 @@
+<?php
+
+namespace App\Http\Resources\Client;
+
+use App\Models\{{EntityName}};
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+// Resource — контракт для клиента. Лишние колонки отсекаются раньше, в select репозитория;
+// здесь только форма ответа и явные приведения типов.
+// РЕШЕНИЕ: если для админки нужна другая форма (например, полный массив translations) —
+// отдельный класс в App\Http\Resources\Admin (предложение, подтвердить у автора).
+
+/**
+ * @mixin {{EntityName}}
+ *
+ * @property string $label
+ */
+class {{EntityName}}Resource extends JsonResource
+{
+    /**
+     * Transform the resource into an array.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            '{{parent_id}}' => $this->{{parent_id}},
+            'label' => $this->label,
+            // 'price' => (float) $this->price,
+            // 'is_active' => (bool) $this->is_active,
+            // 'nullable_price' => $this->price !== null ? (float) $this->price : null,
+            // '{{parentName}}' => {{ParentName}}Resource::make($this->whenLoaded('{{parentName}}')),
+        ];
+    }
+}

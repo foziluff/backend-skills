@@ -1,0 +1,80 @@
+<?php
+
+namespace Tests\Feature\{{EntityName}};
+
+use App\Enums\Role;
+use App\Models\{{EntityName}};
+use App\Models\{{ParentName}};
+use App\Models\User;
+use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
+
+// tests/Feature/{{EntityName}}/Store{{EntityName}}Test.php
+// Один файл — один эндпоинт. Методы: test_{что}_{результат}_when_{условие}.
+// Покрыть: happy path · каждое доменное исключение сервиса · доступ (401/403/404) · границы валидации.
+class Store{{EntityName}}Test extends TestCase
+{
+    public function test_store_creates_{{entity_name}}(): void
+    {
+        ${{parentName}} = {{ParentName}}::factory()->create();
+        Sanctum::actingAs($this->admin());
+
+        $response = $this->postJson('/api/{{entity-names}}', [
+            '{{parent_id}}' => ${{parentName}}->id,
+            'label' => 'First',
+        ]);
+
+        $response->assertCreated()   // РЕШЕНИЕ: 201, если репозиторий вернул модель из Model::create(); 200, если перечитал через findById
+            ->assertJsonPath('label', 'First')
+            ->assertJsonPath('{{parent_id}}', ${{parentName}}->id);
+        $this->assertDatabaseHas('{{entity_names}}', ['{{parent_id}}' => ${{parentName}}->id, 'label' => 'First']);
+    }
+
+    public function test_store_returns_404_when_{{parent_name}}_does_not_exist(): void
+    {
+        Sanctum::actingAs($this->admin());
+
+        $this->postJson('/api/{{entity-names}}', ['{{parent_id}}' => 999999, 'label' => 'First'])
+            ->assertNotFound()
+            ->assertExactJson(['message' => __('all.{{parent_name}}_not_found')]);
+    }
+
+    public function test_store_returns_422_when_limit_is_reached(): void
+    {
+        ${{parentName}} = {{ParentName}}::factory()->create();
+        {{EntityName}}::factory()->count({{EntityName}}::MAX_PER_{{PARENT_NAME}})->for(${{parentName}})->create();
+        Sanctum::actingAs($this->admin());
+
+        $this->postJson('/api/{{entity-names}}', ['{{parent_id}}' => ${{parentName}}->id, 'label' => 'Extra'])
+            ->assertUnprocessable()
+            ->assertExactJson(['message' => __('all.{{entity_name}}_limit_reached')]);
+    }
+
+    public function test_store_returns_all_validation_errors_at_once(): void
+    {
+        Sanctum::actingAs($this->admin());
+
+        $this->postJson('/api/{{entity-names}}', [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['{{parent_id}}', 'label']);   // форма → без stopOnFirstFailure
+    }
+
+    public function test_store_returns_403_for_non_admin(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        $this->postJson('/api/{{entity-names}}', [])
+            ->assertForbidden();
+    }
+
+    public function test_store_requires_authentication(): void
+    {
+        $this->postJson('/api/{{entity-names}}', [])
+            ->assertUnauthorized();
+    }
+
+    private function admin(): User
+    {
+        return User::factory()->create(['role' => Role::ADMIN->value]);
+    }
+}

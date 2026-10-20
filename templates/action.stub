@@ -1,0 +1,36 @@
+<?php
+
+namespace App\Actions;
+
+use App\Repositories\{{EntityName}}Repository;
+use Illuminate\Support\Facades\Log;
+use Throwable;
+
+// Action — операция, которую вызывают ≥2 сервиса/точки входа (HTTP, scheduler, OCPP).
+// Единственный публичный метод — handle.
+// РЕШЕНИЕ: утилита без зависимостей → `public static function handle(...)` и без конструктора.
+readonly class {{Verb}}{{EntityName}}Action
+{
+    public function __construct(
+        private {{EntityName}}Repository ${{entityName}}Repository,
+    ) {}
+
+    public function handle(int $id /* , ... */): mixed
+    {
+        try {
+            return transaction(function () use ($id) {
+                // 1. достать с lockForUpdate и проверить состояние → доменное исключение
+                // 2. расчёты (формулы — static-методы модели), round(..., 2) для денег
+                // 3. записи через репозитории
+                // 4. побочные эффекты через репозитории-шлюзы (внутри defer)
+            });
+        } catch (Throwable $e) {
+            // РЕШЕНИЕ: log-and-rethrow — только для денежных/зарядных операций (канал charging)
+            Log::channel('charging')->error('Failed to {{verb}} {{entity_name}}: '.$e->getMessage(), [
+                '{{entity_name}}_id' => $id,
+                'exception' => get_class($e),
+            ]);
+            throw $e;
+        }
+    }
+}

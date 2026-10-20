@@ -1,0 +1,26 @@
+<?php
+
+namespace Tests;
+
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Facades\Http;
+
+// tests/TestCase.php
+abstract class TestCase extends BaseTestCase
+{
+    use RefreshDatabase;   // РЕШЕНИЕ: для тестов FULLTEXT-поиска — DatabaseTruncation (InnoDB индексирует FULLTEXT только при коммите)
+
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Ни один тест не уходит в сеть: WS-шлюз, OCPP-команды, FCM, SMS — всё через Http.
+        Http::preventStrayRequests();
+        Http::fake([
+            '*/broadcast' => Http::response([]),
+            '*/command/*' => Http::response(['status' => 'Accepted']),
+        ]);
+    }
+}

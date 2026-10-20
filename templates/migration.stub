@@ -1,0 +1,38 @@
+<?php
+
+// database/migrations/{{YYYY_MM_DD_HHMMSS}}_create_{{entity_names}}_table.php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('{{entity_names}}', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('{{parent_id}}')->constrained()->cascadeOnDelete();
+
+            // РЕШЕНИЕ: типы колонок
+            //   деньги          → $table->decimal('price', 36, 2);
+            //   энергия/счётчик → $table->unsignedBigInteger('watts');
+            //   статус/тип      → $table->string('status');            // + backed enum в app/Enums
+            //   флаг            → $table->boolean('is_active')->default(false);
+            //   момент времени  → $table->timestamp('started_at')->nullable();
+            //   переводимые поля (name, address…) колонками НЕ создаются — они в таблице translations
+            $table->string('label');
+
+            $table->softDeletes();   // РЕШЕНИЕ: убрать, если сущность не бизнесовая (лог, справочник без удаления)
+            $table->timestamps();
+
+            // РЕШЕНИЕ: составные индексы строго под where из репозитория, в том же порядке колонок
+            // $table->index(['{{parent_id}}', 'status']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('{{entity_names}}');
+    }
+};

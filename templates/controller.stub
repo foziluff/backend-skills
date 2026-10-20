@@ -1,0 +1,50 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Requests\{{EntityName}}\Index{{EntityName}}Request;
+use App\Http\Requests\{{EntityName}}\Store{{EntityName}}Request;
+use App\Http\Requests\{{EntityName}}\Update{{EntityName}}Request;
+use App\Http\Resources\Client\CursorPaginationResource;
+use App\Http\Resources\Client\EmptyResource;
+use App\Http\Resources\Client\{{EntityName}}Resource;
+use App\Services\{{EntityName}}Service;
+
+// Контроллер: одна строка на метод. Никаких if, Eloquent и бизнес-проверок.
+// Всегда Resource — в том числе для админки и пустых ответов.
+// auth()->user()/auth()->id() — только здесь, в сервис передаются аргументом.
+class {{EntityName}}Controller extends Controller
+{
+    public function __construct(
+        private readonly {{EntityName}}Service ${{entityName}}Service
+    ) {}
+
+    public function index(Index{{EntityName}}Request $request): CursorPaginationResource
+    {
+        $paginator = $this->{{entityName}}Service->cursorPaginateBy{{ParentName}}Id($request->integer('{{parent_id}}'));
+
+        return CursorPaginationResource::make($paginator, {{EntityName}}Resource::class);
+    }
+
+    public function show(int $id): {{EntityName}}Resource
+    {
+        return {{EntityName}}Resource::make($this->{{entityName}}Service->getById($id));
+    }
+
+    public function store(Store{{EntityName}}Request $request): {{EntityName}}Resource
+    {
+        return {{EntityName}}Resource::make($this->{{entityName}}Service->create($request->validated()));
+    }
+
+    public function update(Update{{EntityName}}Request $request, int $id): {{EntityName}}Resource
+    {
+        return {{EntityName}}Resource::make($this->{{entityName}}Service->update($id, $request->validated()));
+    }
+
+    public function destroy(int $id): EmptyResource
+    {
+        $this->{{entityName}}Service->delete($id);
+
+        return EmptyResource::make();
+    }
+}

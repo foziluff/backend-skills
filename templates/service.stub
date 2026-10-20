@@ -1,0 +1,87 @@
+<?php
+
+namespace App\Services;
+
+use App\Exceptions\{{EntityName}}LimitReachedException;
+use App\Exceptions\{{EntityName}}NotFoundException;
+use App\Exceptions\{{ParentName}}NotFoundException;
+use App\Models\{{EntityName}};
+use App\Repositories\{{EntityName}}Repository;
+use App\Repositories\{{ParentName}}Repository;
+use Illuminate\Contracts\Pagination\CursorPaginator;
+
+// Сервис: вся бизнес-логика. Никаких auth()/request()/abort()/response()/Eloquent/DB::.
+// readonly class → свойства private БЕЗ повторного readonly.
+readonly class {{EntityName}}Service
+{
+    public function __construct(
+        private {{EntityName}}Repository ${{entityName}}Repository,
+        private {{ParentName}}Repository ${{parentName}}Repository,
+    ) {}
+
+    public function cursorPaginateBy{{ParentName}}Id(int ${{parentName}}Id): CursorPaginator
+    {
+        if (! $this->{{parentName}}Repository->existsById(${{parentName}}Id)) {
+            throw new {{ParentName}}NotFoundException;
+        }
+
+        return $this->{{entityName}}Repository->cursorPaginateBy{{ParentName}}Id(${{parentName}}Id);
+    }
+
+    public function getById(int $id): {{EntityName}}
+    {
+        ${{entityName}} = $this->{{entityName}}Repository->findById($id);
+
+        if (! ${{entityName}}) {
+            throw new {{EntityName}}NotFoundException;
+        }
+
+        return ${{entityName}};
+    }
+
+    public function create(array $data): {{EntityName}}
+    {
+        return transaction(function () use ($data) {
+            $this->validate{{ParentName}}Exists($data['{{parent_id}}']);
+
+            if ($this->{{entityName}}Repository->countBy{{ParentName}}Id($data['{{parent_id}}'], true) >= {{EntityName}}::MAX_PER_{{PARENT_NAME}}) {
+                throw new {{EntityName}}LimitReachedException;
+            }
+
+            return $this->{{entityName}}Repository->create($data);
+        });
+    }
+
+    public function update(int $id, array $data): {{EntityName}}
+    {
+        return transaction(function () use ($id, $data) {
+            if (isset($data['{{parent_id}}'])) {
+                $this->validate{{ParentName}}Exists($data['{{parent_id}}']);
+            }
+
+            ${{entityName}} = $this->{{entityName}}Repository->update($id, $data);
+
+            if (! ${{entityName}}) {
+                throw new {{EntityName}}NotFoundException;
+            }
+
+            return ${{entityName}};
+        });
+    }
+
+    public function delete(int $id): void
+    {
+        if (! $this->{{entityName}}Repository->softDelete($id)) {
+            throw new {{EntityName}}NotFoundException;
+        }
+    }
+
+    // Проверка, повторяющаяся в create и update, — один private-метод (DRY).
+    // Если такая же проверка нужна в другом сервисе — выносить в Action, не копировать.
+    private function validate{{ParentName}}Exists(int ${{parentName}}Id): void
+    {
+        if (! $this->{{parentName}}Repository->existsById(${{parentName}}Id, true)) {
+            throw new {{ParentName}}NotFoundException;
+        }
+    }
+}

@@ -1,0 +1,23 @@
+// ── bootstrap/app.php ─────────────────────────────────────────────
+// 1) импорт вверху файла (сортировка по алфавиту):
+use App\Exceptions\{{EntityName}}NotFoundException;
+use App\Exceptions\{{EntityName}}LimitReachedException;
+
+// 2) строки в match (true) внутри mapExceptionToResponseData():
+//    РЕШЕНИЕ: статус по таблице references/error-handling.md
+//      нет/чужая → 404 · бизнес-правило/лимит/состояние → 422 · конфликт с состоянием → 409
+//      нет денег → 402 · физическое предусловие → 412
+$e instanceof {{EntityName}}NotFoundException => [Response::HTTP_NOT_FOUND, __('all.{{entity_name}}_not_found')],
+$e instanceof {{EntityName}}LimitReachedException => [Response::HTTP_UNPROCESSABLE_ENTITY, __('all.{{entity_name}}_limit_reached')],
+
+// ── lang/ru/all.php ───────────────────────────────────────────────
+'{{entity_name}}_not_found' => '{{Сущность}} не найден(а)',
+'{{entity_name}}_limit_reached' => 'Достигнут лимит: {{сущность}}',
+
+// ── lang/tg/all.php ───────────────────────────────────────────────
+'{{entity_name}}_not_found' => '{{перевод на таджикский}}',
+'{{entity_name}}_limit_reached' => '{{перевод на таджикский}}',
+
+// ── lang/en/all.php ───────────────────────────────────────────────
+'{{entity_name}}_not_found' => '{{Entity}} not found',
+'{{entity_name}}_limit_reached' => '{{Entity}} limit reached',

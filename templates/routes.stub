@@ -1,0 +1,23 @@
+// routes/api.php — добавить use и маршруты в нужную группу.
+use App\Http\Controllers\{{EntityName}}Controller;
+
+// РЕШЕНИЕ: группа доступа
+//   публичное чтение для приложения        → вверху файла, вне групп
+//   действия пользователя                  → внутри Route::middleware(['auth:sanctum'])
+//   управление (CRUD админки)              → внутри Route::middleware('role:'.Role::ADMIN->value)
+
+Route::middleware(['auth:sanctum'])->group(function (): void {
+    Route::middleware('role:'.Role::ADMIN->value)->group(function (): void {
+        Route::get('{{entity-names}}', [{{EntityName}}Controller::class, 'index']);
+        Route::get('{{entity-names}}/{id}', [{{EntityName}}Controller::class, 'show'])->whereNumber('id');
+        Route::post('{{entity-names}}', [{{EntityName}}Controller::class, 'store']);
+        Route::patch('{{entity-names}}/{id}', [{{EntityName}}Controller::class, 'update'])->whereNumber('id');
+        Route::delete('{{entity-names}}/{id}', [{{EntityName}}Controller::class, 'destroy'])->whereNumber('id');
+
+        // Действие над ресурсом — POST с глаголом:
+        // Route::post('{{entity-names}}/{id}/{{verb}}', [{{EntityName}}Controller::class, '{{verb}}'])->whereNumber('id');
+    });
+});
+
+// Чувствительный публичный маршрут — с throttle:
+// Route::post('send-code', [UserController::class, 'sendCode'])->middleware('throttle:1,1');

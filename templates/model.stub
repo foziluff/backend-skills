@@ -1,0 +1,69 @@
+<?php
+
+namespace App\Models;
+
+// РЕШЕНИЕ: если есть переводимые поля — use App\Traits\HasTranslations; и добавить в use-список трейтов
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+/**
+ * @property int $id
+ * @property int ${{parent_id}}
+ * @property string $label
+ * @property {{ParentName}}|null ${{parentName}}
+ */
+class {{EntityName}} extends Model
+{
+    use HasFactory, SoftDeletes;
+
+    // РЕШЕНИЕ: бизнес-лимиты и параметры — типизированные константы, никаких магических чисел в сервисе
+    public const int MAX_PER_{{PARENT_NAME}} = 100;
+
+    protected $fillable = [
+        '{{parent_id}}',
+        'label',
+    ];
+
+    // РЕШЕНИЕ: переводимые поля (если используется HasTranslations)
+    // protected array $translatable = [
+    //     'name',
+    // ];
+
+    // Только то, что реально нужно клиенту. Переводимые поля тоже перечисляются здесь.
+    public const array DEFAULT_SELECT_COLUMNS = [
+        'id',
+        '{{parent_id}}',
+        'label',
+    ];
+
+    protected $hidden = [
+        'created_at',
+        'updated_at',
+        'deleted_at',
+    ];
+
+    #[\Override]
+    protected function casts(): array
+    {
+        return [
+            '{{parent_id}}' => 'integer',
+            // 'price' => 'float',
+            // 'is_active' => 'boolean',
+            // 'status' => {{EntityName}}Status::class,
+            // 'started_at' => 'datetime',
+        ];
+    }
+
+    public function {{parentName}}(): BelongsTo
+    {
+        return $this->belongsTo({{ParentName}}::class);
+    }
+
+    // РЕШЕНИЕ: доменная математика — public static, чтобы одна формула использовалась в сервисе, Action и accessor
+    // public static function calculateX(int $a, float $b): float
+    // {
+    //     return round($a * $b, 2);
+    // }
+}

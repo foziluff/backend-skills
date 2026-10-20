@@ -1,0 +1,21 @@
+<?php
+
+namespace App\Http\Requests\{{EntityName}};
+
+use Illuminate\Foundation\Http\FormRequest;
+
+// Те же правила и границы, что в Store, но 'sometimes' вместо 'required' (PATCH = частичное обновление).
+// Форма → без $stopOnFirstFailure и без 'bail'.
+class Update{{EntityName}}Request extends FormRequest
+{
+    public function rules(): array
+    {
+        return [
+            '{{parent_id}}' => ['sometimes', 'integer', 'min:1', 'max:999999999999999'],
+            'label' => ['sometimes', 'string', 'min:1', 'max:255'],
+            // 'translations' => ['sometimes', 'array', 'min:1', 'max:1000'],
+            // 'translations.*.language_code' => ['required', 'distinct', 'string', 'size:2'],
+            // 'translations.*.name' => ['sometimes', 'string', 'min:1', 'max:255'],
+        ];
+    }
+}
