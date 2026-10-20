@@ -6,10 +6,11 @@ use App\Models\{{EntityName}};
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-// Resource — контракт для клиента. Лишние колонки отсекаются раньше, в select репозитория;
-// здесь только форма ответа и явные приведения типов.
-// РЕШЕНИЕ: если для админки нужна другая форма (например, полный массив translations) —
-// отдельный класс в App\Http\Resources\Admin (предложение, подтвердить у автора).
+// Resource — the client contract: an explicit whitelist of fields with explicit casts.
+// Extra columns are cut off earlier, in the repository select. Never load relations here (whenLoaded only) — no queries.
+// Never expose internal/sensitive fields (remote_code, tokens, timestamps not needed by the client).
+// DECISION: if the admin panel needs another shape (e.g. the full translations array) —
+// a separate class in App\Http\Resources\Admin (a proposal, to confirm with the author).
 
 /**
  * @mixin {{EntityName}}

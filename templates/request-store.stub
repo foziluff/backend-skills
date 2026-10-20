@@ -6,15 +6,17 @@ use Illuminate\Foundation\Http\FormRequest;
 
 // app/Http/Requests/{{EntityName}}/Store{{EntityName}}Request.php
 //
-// РЕШЕНИЕ — политика остановки:
-//   • многополевая ФОРМА (admin store/update, профиль) → БЕЗ $stopOnFirstFailure и БЕЗ 'bail' (как ниже):
-//     фронт получает все ошибки сразу;
-//   • фильтр / query-параметры / действие с 1–2 полями → добавить
+// DECISION — stop policy:
+//   • a multi-field FORM (admin store/update, profile) → WITHOUT $stopOnFirstFailure and WITHOUT 'bail' (as below):
+//     the frontend gets all errors at once;
+//   • a filter / query parameters / a 1–2-field action → add
 //         protected $stopOnFirstFailure = true;
-//     и 'bail' первым элементом каждого правила (см. request-index.stub).
+//     and 'bail' as the first element of every rule (see request-index.stub).
 //
-// Никаких exists:/unique: — существование и уникальность проверяет сервис внутри transaction() с lockForUpdate.
-// authorize() не пишем — доступ задают middleware маршрута.
+// No exists:/unique: — no DB queries outside repositories; the service checks existence/uniqueness inside transaction() with lockForUpdate.
+// No authorize() — access is declared by route middleware.
+// rules() never reads the request/route/user (the Swagger generator calls it without a request).
+// Every field: an explicit type token + bounds. NEVER privileged fields (role, balance…) in a user-facing request.
 class Store{{EntityName}}Request extends FormRequest
 {
     public function rules(): array
@@ -25,7 +27,7 @@ class Store{{EntityName}}Request extends FormRequest
             // 'price' => ['required', 'numeric', 'min:0.01', 'max:99999999.99'],
             // 'status' => ['required', new Enum({{EntityName}}Status::class)],
             // 'opening_time' => ['required', 'date_format:H:i'],
-            // Переводы:
+            // Translations:
             // 'translations' => ['required', 'array', 'min:1', 'max:1000'],
             // 'translations.*.language_code' => ['required', 'distinct', 'string', 'size:2'],
             // 'translations.*.name' => ['required', 'string', 'min:1', 'max:255'],

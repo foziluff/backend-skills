@@ -9,6 +9,6 @@ use RuntimeException;
 
 class {{EntityName}}{{Problem}}Exception extends RuntimeException {}
 
-// После создания ОБЯЗАТЕЛЬНО:
-//   1) строка в match в bootstrap/app.php — см. templates/exception-mapping.stub
-//   2) ключ '{{entity_name}}_{{problem}}' в lang/ru/all.php, lang/tg/all.php, lang/en/all.php
+// After creating it, ALWAYS:
+//   1) add a line to the match in bootstrap/app.php — see templates/exception-mapping.stub
+//   2) add the key '{{entity_name}}_{{problem}}' to lang/ru/all.php, lang/tg/all.php, lang/en/all.php

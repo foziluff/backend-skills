@@ -1,62 +1,63 @@
-# Архитектура
+# Architecture
 
-## Карта проекта
+## Project map
 
 ```
 app/
-├── Actions/           # операции, общие для нескольких сервисов/точек входа (readonly, ::handle)
-├── Enums/             # string-backed enum: статусы, роли, типы
-├── Exceptions/        # пустые доменные исключения, по одному на бизнес-ошибку
+├── Actions/           # operations shared by several services/entry points (readonly, ::handle)
+├── Enums/             # string-backed enums: statuses, roles, types — every fixed set of values
+├── Exceptions/        # empty domain exceptions, one per business error
 ├── Http/
-│   ├── Controllers/   # тонкие, одна строка на метод
-│   ├── Middleware/    # RoleMiddleware (role:admin), OCPPMiddleware (общий секрет шлюза)
+│   ├── Controllers/   # thin, one line per method
+│   ├── Middleware/    # RoleMiddleware (role:admin), OCPPMiddleware (gateway shared secret)
 │   ├── Requests/{Entity}/{Verb}{Entity}Request.php
-│   └── Resources/Client/   # выходной контракт + пагинационные обёртки
-├── Models/            # Eloquent: fillable, DEFAULT_SELECT_COLUMNS, casts(), accessors, доменная математика
-├── Providers/AppServiceProvider.php   # preventLazyLoading, withoutWrapping, локаль
-├── Repositories/      # доступ к БД + шлюзы во внешние системы
-├── Services/          # бизнес-логика, транзакции
-├── Support/Helpers/helpers.php        # глобальные функции: transaction(), full_url(), accept_language()
-└── Traits/HasTranslations.php         # полиморфные переводы
-bootstrap/app.php      # middleware-алиасы + центральный маппинг исключений → HTTP
-routes/api.php         # все маршруты API в одном файле
-routes/console.php     # scheduler (замыкания)
-config/custom.php      # все проектные env-настройки
+│   └── Resources/Client/   # output contract + pagination wrappers
+├── Models/            # Eloquent: fillable, DEFAULT_SELECT_COLUMNS, $hidden, casts(), accessors, domain math
+├── Providers/AppServiceProvider.php   # preventLazyLoading, withoutWrapping, locale
+├── Repositories/      # the ONLY place for DB access + gateways to external systems
+├── Services/          # business logic, transactions
+├── Support/Helpers/helpers.php        # global functions: transaction(), full_url(), accept_language()
+└── Traits/HasTranslations.php         # polymorphic translations
+bootstrap/app.php      # middleware aliases + central exception → HTTP mapping
+routes/api.php         # all API routes in one file
+routes/console.php     # scheduler (closures)
+config/custom.php      # all project-specific env settings
 lang/{ru,tg,en}/all.php
 ```
 
-Код сгруппирован **по слоям, а не по фичам**. Внутри `Requests/` есть подпапки по сущностям,
-потому что на одну сущность приходится много FormRequest'ов.
+Code is grouped **by layer, not by feature**. `Requests/` has sub-folders per entity because one entity has many FormRequests.
 
-*Почему по слоям:* [гипотеза] проект один, сущностей около 13, большинство сценариев затрагивает
-несколько сущностей сразу (сессия = коннектор + пользователь + транзакция + уведомление).
-При группировке по фичам такие межмодульные зависимости были бы размазаны по папкам.
-*Компромисс:* папки `Services/` и `Repositories/` растут линейно с числом сущностей.
+*Why by layer:* [hypothesis] one project, about 13 entities, and most scenarios touch several entities at once
+(a session = connector + user + transaction + notification). Grouping by feature would scatter these cross-module dependencies.
+*Trade-off:* `Services/` and `Repositories/` grow linearly with the number of entities.
 
-## Направление зависимостей
+## Dependency direction
 
 ```
 Controller ─► Service ─► Repository ─► Model
                  │            ▲
                  └─► Action ──┘
-Repository ─► Repository   (допустимо: MobileCommandRepository → UserRepository, ChargingSessionRepository)
-Repository ─► Action       (только «технический» Action: SendWebsocketRequestAction)
-Repository ─► Resource     (только для сериализации payload WS-пушей: MobileCommandRepository)
+Repository ─► Repository   (allowed: MobileCommandRepository → UserRepository, ChargingSessionRepository)
+Repository ─► Action       (legacy: only the technical SendWebsocketRequestAction; target — HTTP client inside a repository)
+Repository ─► Resource     (only to serialize WS push payloads: MobileCommandRepository)
 ```
 
-Запрещено:
-- Service → Controller/Request/Resource (сервис не знает про HTTP);
-- Repository → Service (репозиторий не принимает решений);
+Forbidden:
+- Service → Controller/Request/Resource (the service knows nothing about HTTP);
+- Service → Eloquent/`DB::`/`Http::` (all data access and external calls go through repositories) **[confirmed]**;
+- Repository → Service (a repository makes no decisions);
 - Model → Repository/Service;
-- Controller → Repository напрямую (legacy: `UserController::devToken` обращается к `User::` — так не делать).
+- Controller → Repository or Eloquent directly (legacy: `UserController::devToken` uses `User::` — do not do this).
+
+Strict data-access rule (where queries and external HTTP may live) — [performance.md](performance.md#data-access).
 
 ---
 
 <a id="controller"></a>
 ## Controller
 
-**Только HTTP-слой** **[подтверждено]**. **Что делает:** берёт провалидированные данные, достаёт текущего пользователя, вызывает **один** метод
-сервиса и оборачивает результат в Resource.
+**HTTP layer only** **[confirmed]**. **What it does:** takes validated data, gets the current user, calls **one** service
+method and wraps the result in a Resource.
 
 ```php
 // app/Http/Controllers/ChargingSessionController.php
@@ -66,29 +67,30 @@ public function store(StoreChargingSessionRequest $request): ChargingSessionReso
 }
 ```
 
-Правила:
-- Наследуется от пустого `abstract class Controller`.
-- Зависимость — **один** сервис, через `private readonly` в constructor promotion.
-  (У контроллера класс не `readonly`, поэтому `readonly` стоит на свойстве — это **не** нарушение правила «без двойного readonly».)
-- Возвращаемый тип — конкретный Resource (`PointResource`, `CursorPaginationResource`, `AnonymousResourceCollection`, `EmptyResource`).
-- Скалярные параметры запроса берутся через `$request->integer('point_id')` / `$request->float('radius')` /
-  `$request->validated('phone')`, целиком — `$request->validated()`.
-- `auth()->user()` / `auth()->id()` вызываются **только здесь** и передаются в сервис аргументом
-  (`getById($id, auth()->id())`).
-- Path-параметр типизирован (`int $id`, `string $code`), а маршрут ограничен `->whereNumber('id')`.
-- Имена методов — REST (`index`, `show`, `store`, `update`, `destroy`) или глагол действия
+Rules:
+- Extends the empty `abstract class Controller`.
+- Depends on **one** service via `private readonly` in constructor promotion.
+  (The controller class itself is not `readonly`, so `readonly` sits on the property — this does **not** break the
+  "no double readonly" rule.)
+- The return type is a concrete Resource (`PointResource`, `CursorPaginationResource`, `AnonymousResourceCollection`, `EmptyResource`).
+- Scalar parameters via `$request->integer('point_id')` / `$request->float('radius')` / `$request->validated('phone')`;
+  the whole payload via `$request->validated()`. Never `$request->all()`.
+- `auth()->user()` / `auth()->id()` are called **only here** and passed to the service as arguments (`getById($id, auth()->id())`).
+- Path parameters are typed (`int $id`, `string $code`) and the route is constrained with `->whereNumber('id')`.
+- Method names: REST (`index`, `show`, `store`, `update`, `destroy`) or an action verb
   (`stop`, `topUp`, `sendCode`, `verifyPhone`, `getSelf`, `updateSelf`).
 
-*Почему:* одно и то же правило вызывается из HTTP, из scheduler (`routes/console.php` → `autoUpdateProgress`)
-и из OCPP-обработчика. Если логика живёт в контроллере, её не вызвать без HTTP-запроса.
-*Компромисс:* для тривиальных CRUD сервис часто просто проксирует вызов (`SettingService`) — так и задумано.
+*Why:* the same rule is called from HTTP, from the scheduler (`routes/console.php` → `autoUpdateProgress`) and from the OCPP
+handler. Logic in a controller cannot be called without an HTTP request.
+*Trade-off:* for trivial CRUD the service often just proxies the call (`SettingService`) — this is intended.
 
 ---
 
 <a id="service"></a>
 ## Service
 
-**Что делает:** вся бизнес-логика — проверки, лимиты, расчёты, транзакции, порядок побочных эффектов.
+**What it does:** all business logic — checks, limits, calculations, ownership, transactions, order of side effects.
+It does not query the database and does not call external systems itself — only through repositories. **[confirmed]**
 
 ```php
 readonly class ChargerService
@@ -99,51 +101,52 @@ readonly class ChargerService
     ) {}
 ```
 
-Правила:
-- `readonly class`, зависимости — `private` без повторного `readonly`. **[подтверждено]**
-  (legacy с двойным readonly: `UserService`, `NotificationService`, `PaymentService`, `TransactionService`.)
-- Зависит от репозиториев своей и **соседних** сущностей и от Action'ов. Другие сервисы не внедряет
-  (в проекте нет ни одного Service → Service). [гипотеза: так нет циклов, а общий код выносится в Action]
-- Публичный метод = сценарий: `getById`, `create`, `update`, `delete`, `cursorPaginate`, `getInRadius`, `stop`, `topUp`.
-- `getById()` **бросает** `XxxNotFoundException`, если репозиторий вернул `null`.
-  Этот же `getById()` переиспользуется внутри `update()` (`ChargerService::update`, `ConnectorService::update`).
-- Проверки вынесены в private-методы с говорящими именами:
+Rules:
+- `readonly class`, dependencies `private` without a repeated `readonly`. **[confirmed]**
+  (legacy with double readonly: `UserService`, `NotificationService`, `PaymentService`, `TransactionService`.)
+- Depends on repositories of its own and **neighbouring** entities and on Actions. It does not inject other services
+  (there is no Service → Service dependency in the project). [hypothesis: no cycles; shared code goes into an Action]
+- Public method = a scenario: `getById`, `create`, `update`, `delete`, `cursorPaginate`, `getInRadius`, `stop`, `topUp`.
+- `getById()` **throws** `XxxNotFoundException` when the repository returns `null`; the same `getById()` is reused inside
+  `update()` (`ChargerService::update`, `ConnectorService::update`).
+- Checks live in private methods with meaningful names:
   `getAndValidateConnectorForStart()`, `validateActiveSessionsLimit()`, `validateUserBalanceForStart()`.
-- Модифицирующие сценарии обёрнуты в `transaction(function () use (...) { ... })`; внутри все проверки идут
-  с `lockForUpdate` (`existsById($id, true)`, `countByPointId($id, true)`).
-- Ошибки — только доменные исключения (`throw new ConnectorBusyException;`).
-- Ownership-проверка выдаёт `NotFound`, а не 403:
+- Modifying scenarios are wrapped in `transaction(function () use (...) { ... })`; inside it every check uses `lockForUpdate`
+  (`existsById($id, true)`, `countByPointId($id, true)`).
+- Errors are only domain exceptions (`throw new ConnectorBusyException;`).
+- Ownership check answers `NotFound`, not 403:
   `if (! $session || $session->user_id !== $authUserId) throw new ChargingSessionNotFoundException;`
-  [гипотеза: не раскрываем, что чужой ресурс существует]
+  [hypothesis: do not reveal that someone else's resource exists]
 
 ---
 
 <a id="action"></a>
 ## Action
 
-Используется, когда операцию вызывают **несколько** сервисов или точек входа.
+Used when an operation is called by **several** services or entry points.
 
-| Action | Кто вызывает | Вид |
+| Action | Called by | Kind |
 |---|---|---|
-| `StopChargingSessionAction` | `ChargingSessionService::stop`, `ChargingSessionService::autoUpdateProgress`, `OCPPService::handleStatusNotification/handleStopTransaction` | инстанс с DI |
-| `SendWebsocketRequestAction` | `MobileCommandRepository`, `OCPPCommandRepository` | static, технический |
-| `StoreImageAction` / `DeleteImageAction` | `ConnectorTypeService` | static, технический |
+| `StopChargingSessionAction` | `ChargingSessionService::stop`, `ChargingSessionService::autoUpdateProgress`, `OCPPService::handleStatusNotification/handleStopTransaction` | instance with DI |
+| `SendWebsocketRequestAction` | `MobileCommandRepository`, `OCPPCommandRepository` | static, technical (legacy placement: external HTTP belongs in a repository) |
+| `StoreImageAction` / `DeleteImageAction` | `ConnectorTypeService` | static, technical (filesystem) |
 
-Правила:
-- `readonly class`, единственный публичный метод — **`handle`**. **[подтверждено]**
-  (legacy: `execute` в `StopChargingSessionAction` и `SendWebsocketRequestAction`.)
-- Если Action нужны репозитории — это инстанс с DI (`public function handle(...)`).
-  Если это чистая техническая утилита без зависимостей — `public static function handle(...)`.
-- Бизнес-Action (`StopChargingSessionAction`) сам владеет своей транзакцией, логированием и побочными эффектами,
-  потому что его вызывают из разных контекстов.
+Rules:
+- `readonly class`, the only public method is **`handle`**. **[confirmed]**
+  (legacy: `execute` in `StopChargingSessionAction` and `SendWebsocketRequestAction`.)
+- An Action that needs repositories is an instance with DI (`public function handle(...)`).
+  A pure technical utility without dependencies is `public static function handle(...)`.
+- An Action follows the same data-access rule as a service: it talks to the DB and external systems only through repositories.
+- A business Action (`StopChargingSessionAction`) owns its transaction, logging and side effects, because it is called from
+  different contexts.
 
-*Почему не сервис:* сервис привязан к одной сущности/контроллеру; если бы `OCPPService` внедрял
-`ChargingSessionService`, появилась бы связка между сервисами. Action — нейтральная общая точка. [гипотеза]
+*Why not a service:* a service is tied to one entity/controller; if `OCPPService` injected `ChargingSessionService`,
+services would become coupled. An Action is a neutral shared point. [hypothesis]
 
 ---
 
 <a id="repository"></a>
-## Repository (БД)
+## Repository (database)
 
 ```php
 readonly class ChargerRepository
@@ -161,74 +164,79 @@ readonly class ChargerRepository
     }
 ```
 
-- **Максимально тупой** **[подтверждено]**: только операции с данными, ни одного бизнес-решения
-  (полная таблица «можно / нельзя» — в [data-layer.md](data-layer.md#repository)).
-- `readonly class` без интерфейса. Внедряется по конкретному классу.
-  *Почему без интерфейсов:* [гипотеза] одна реализация, одна БД; интерфейс дал бы только лишний файл.
-  *Компромисс:* в тестах подменять приходится через `$this->mock(ConcreteRepository::class)`, а не через биндинг.
-- Возвращает `?Model`, `bool`, `int`, `Collection`, `CursorPaginator`/`Paginator`. **Не бросает** доменные исключения.
-- Подробные правила запросов — в [data-layer.md](data-layer.md#repository).
+- **As dumb as possible** **[confirmed]**: data operations only, not a single business decision
+  (full "allowed / forbidden" table — [data-layer.md](data-layer.md#repository)).
+- **The only place** where Eloquent, `DB::` and raw SQL appear (besides migrations/seeders). **[confirmed]**
+- Every query must be served by an index and bounded — [performance.md](performance.md#queries).
+- `readonly class` without an interface, injected by its concrete class.
+  *Why no interfaces:* [hypothesis] one implementation, one DB; an interface would only add a file.
+  *Trade-off:* tests substitute it with `$this->mock(ConcreteRepository::class)`, not a binding.
+- Returns `?Model`, `bool`, `int`, `Collection`, `CursorPaginator`/`Paginator`. **Never throws** domain exceptions.
 
 <a id="repository-gateway"></a>
-## Repository как шлюз во внешнюю систему
+## Repository as a gateway to an external system
 
-«Репозиторий» в этом проекте — **любой источник или приёмник данных**, не только БД: [гипотеза]
+In this project a "repository" is **any data source or sink**, not only the DB; outgoing HTTP to external systems lives
+**only** here. **[confirmed]**
 
-| Репозиторий | Что скрывает |
+| Repository | What it hides |
 |---|---|
-| `OCPPCommandRepository` | HTTP-команды Node-шлюзу → зарядникам (`RemoteStartTransaction`, `RemoteStopTransaction`, `ChangeConfiguration`) |
-| `MobileCommandRepository` | WebSocket-пуши мобильному приложению через Node-шлюз (`ActiveSessions`, `UserUpdated`) |
-| `NotificationRepository` | таблица `notifications` + FCM (`FirebasePush`) + SMS-шлюз |
-| `PaymentRepository` | способы оплаты (пока заглушка с TODO) |
+| `OCPPCommandRepository` | HTTP commands to the Node gateway → chargers (`RemoteStartTransaction`, `RemoteStopTransaction`, `ChangeConfiguration`) |
+| `MobileCommandRepository` | WebSocket pushes to the mobile app via the Node gateway (`ActiveSessions`, `UserUpdated`) |
+| `NotificationRepository` | `notifications` table + FCM (`FirebasePush`) + SMS gateway |
+| `PaymentRepository` | payment methods (a TODO stub for now) |
 
-Правила шлюзов:
-- Шлюз — **только транспорт**: получает готовые данные (заголовок, текст, получатель, payload) и доставляет их.
-  Что отправить, кому и на каком языке — решает сервис. (legacy: `NotificationRepository` сам собирает тексты
-  через `__()` и выбирает перевод/топик — при доработке перенести это в `NotificationService`.)
-- Имена событий, действий протокола и статусов ответа — enum, а не строки
-  (legacy: `'UserUpdated'`, `'ActiveSessions'`, `'RemoteStartTransaction'`, `'Accepted'` строками в `MobileCommandRepository` и `OCPPCommandRepository`).
-- Сеть — внутри `defer(function () use (...) { ... })`, чтобы не задерживать ответ и не держать транзакцию открытой.
-  Исключение — когда ответ нужен прямо сейчас (`remoteStartTransaction` возвращает `bool`, иначе сессию не создать).
-- Данные для отложенного вызова **сериализуются до `defer`**
-  (`$userData = UserResource::make($user)->resolve();` в `MobileCommandRepository::pushUserUpdated`):
-  внутри `defer` нет ленивых загрузок, и уходит снимок состояния на момент вызова.
-- Ошибка внешней системы не роняет бизнес-операцию: `SendWebsocketRequestAction` логирует её и возвращает `null`.
+Gateway rules:
+- A gateway is **transport only**: it receives ready data (title, text, recipient, payload) and delivers it.
+  What to send, to whom and in which language is decided by the service. (legacy: `NotificationRepository` builds texts with
+  `__()` and picks the translation/topic itself — move this into `NotificationService` when touching it.)
+- Event names, protocol actions and response statuses are enums, not strings
+  (legacy: `'UserUpdated'`, `'ActiveSessions'`, `'RemoteStartTransaction'`, `'Accepted'` as strings in `MobileCommandRepository` and `OCPPCommandRepository`).
+- URL only from config, `timeout(5)`, response checked, failures logged without secrets — [security.md](security.md#8-service-to-service-and-outgoing-calls).
+- Network calls inside `defer(function () use (...) { ... })` so the response is not delayed and no transaction is held open.
+  Exception: when the answer is needed now (`remoteStartTransaction` returns `bool`, otherwise the session cannot be created).
+- Data for a deferred call is **serialized before `defer`**
+  (`$userData = UserResource::make($user)->resolve();` in `MobileCommandRepository::pushUserUpdated`):
+  no lazy loading inside `defer`, a snapshot of the state is sent, and the closure holds a small array, not a model graph.
+- An external failure does not break the business operation: the gateway logs it and returns `null`/`false`.
 
-*Почему `defer()` вместо очередей:* проект работает на Octane/Swoole, `defer` выполняется после отправки ответа
-в том же воркере, отдельный queue-воркер не нужен. Job-классы (`SendFirebasePushJob`, `SendSmsJob`, `SendMobileCommandJob` и др.)
-были в проекте и удалены 2026-08-17 в пользу `defer`. **[подтверждено принципом «минимум инфраструктуры»]**
-*Компромисс:* нет ретраев и персистентности — при падении воркера задача теряется.
-Если понадобится гарантированная доставка (платежи), только тогда возвращаемся к очередям.
+*Why `defer()` instead of queues:* the project runs on Octane/Swoole; `defer` runs after the response in the same worker,
+so no queue worker is needed. Job classes (`SendFirebasePushJob`, `SendSmsJob`, `SendMobileCommandJob`, etc.) existed and
+were removed on 2026-08-17 in favour of `defer`. **[confirmed by the "minimum infrastructure" principle]**
+*Trade-off:* no retries or persistence — a task is lost if the worker dies.
+Only if guaranteed delivery becomes necessary (payments) do we return to queues.
 
 ---
 
 ## Model
 
-Модель — это схема данных и доменная математика, без обращений к другим слоям:
+A model is the data schema and domain math, with no calls to other layers and **no queries or I/O in accessors**:
 - `ChargingSession::calculateCost()`, `calculateIntervalWatts()`, `getEstimatedWattsDelivered()`, `getIntervalCost()` —
-  чистые расчёты, которые используют сервис, Action и accessor `amount`;
-- вычисляемые статусы через `Attribute` + `$appends` (`Connector::status`, `Charger::is_online`);
-- бизнес-константы (`MAX_ACTIVE_SESSIONS_PER_USER`, `PROGRESS_INTERVAL_SECONDS`, `MAX_RADIUS`, `MAX_COUNT`).
+  pure calculations used by the service, the Action and the `amount` accessor;
+- computed state via `Attribute` + `$appends` (`Connector::status`, `Charger::is_online`) — computed from loaded data
+  instead of a stored, denormalized column;
+- business constants (`MAX_ACTIVE_SESSIONS_PER_USER`, `PROGRESS_INTERVAL_SECONDS`, `MAX_RADIUS`, `MAX_COUNT`).
 
-Детали — в [data-layer.md](data-layer.md#model).
+Details — [data-layer.md](data-layer.md#model).
 
 ---
 
-## Внешний контур
+## External perimeter
 
 ```
-Мобильное приложение ──HTTP──► Laravel API (Octane/Swoole)
-          ▲                         │  POST {WS_SERVER_URL}/broadcast, /command/{remote_code}
-          │ WebSocket               ▼  заголовок Ws-Secret
-          └──────────────── Node WS/OCPP gateway (отдельный репозиторий) ◄──OCPP──► Зарядники
-                                    │
-                                    └──► POST /api/ocpp/message, GET /api/ocpp/chargers/{code}  (OCPPMiddleware)
+Mobile app ──HTTP──► Laravel API (Octane/Swoole)
+     ▲                    │  POST {WS_SERVER_URL}/broadcast, /command/{remote_code}
+     │ WebSocket          ▼  header Ws-Secret
+     └────────── Node WS/OCPP gateway (separate repository) ◄──OCPP──► Chargers
+                          │
+                          └──► POST /api/ocpp/message, GET /api/ocpp/chargers/{code}  (OCPPMiddleware)
 ```
 
-- Laravel не держит WebSocket-соединения: этим занимается Node-шлюз (до 2026-08-30 лежал в этом репо как `ws-server/`, `ykc-server/`).
-- Входящие OCPP-сообщения разбирает `OCPPService::handleMessage` через `match ($action)` по хендлерам `handleXxx`.
+- Laravel holds no WebSocket connections: the Node gateway does (until 2026-08-30 it lived in this repo as `ws-server/`, `ykc-server/`).
+- Incoming OCPP messages are dispatched by `OCPPService::handleMessage` via `match ($action)` to `handleXxx` handlers
+  (target: match on an `OCPPAction` enum, not raw strings — [conventions.md](conventions.md#enum)).
 
-## Фоновые процессы
+## Background processes
 
 ```php
 // routes/console.php
@@ -239,48 +247,52 @@ Schedule::call(function (ChargingSessionService $chargingSessionService) {
     ->withoutOverlapping();
 ```
 
-- Scheduler — замыкание, которое вызывает **метод сервиса** (Command-класс `UpdateChargingProgressCommand` удалён 2026-08-15).
-- `withoutOverlapping()` обязателен для задач, которые могут не уложиться в интервал.
-- Обработка пачками `chunkById(500)`; пачка обрабатывается одной транзакцией (bulk upsert), при сбое —
-  поштучно (`processSessionsBulk` → `processSessionsIndividually`).
+- The scheduler is a closure that calls **a service method** (the `UpdateChargingProgressCommand` class was removed on 2026-08-15).
+- `withoutOverlapping()` is mandatory for tasks that may not finish within the interval.
+- Batches of `chunkById(500)`; a batch is processed in one transaction (bulk upsert), with a one-by-one fallback
+  (`processSessionsBulk` → `processSessionsIndividually`). Batch accumulators are local to the chunk callback (no leaks).
 
 <a id="swagger"></a>
-## Автогенерация документации: почему форма кода важна
+## Generated documentation: why the shape of the code matters
 
-CI после деплоя выполняет `php artisan swagger` (пакет автора `foziluff/swagger`) → `public/api-docs.json`, `public/docs.html`.
-Генератор **не использует аннотации**: он читает маршруты, рефлексию и **исходный код регулярками**. Поэтому часть
-стилевых правил — не вкус, а условие того, что документация будет верной:
+After deploy, CI runs `php artisan swagger` (the author's package `foziluff/swagger`) → `public/api-docs.json`, `public/docs.html`.
+The generator **does not use annotations**: it reads routes, reflection and **source code via regular expressions**.
+So some style rules are not taste but a condition for correct documentation:
 
-| Что делает генератор | Какое правило из этого следует |
+| What the generator does | Resulting rule |
 |---|---|
-| Ищет FormRequest по **типу параметра** метода контроллера (рефлексия) | Входные данные — только через FormRequest в сигнатуре, никаких `$request->validate()` |
-| Создаёт FormRequest через `newInstanceWithoutConstructor()` и вызывает `rules()` | `rules()` **не должен** зависеть от запроса, маршрута, пользователя (`$this->route()`, `$this->user()`, `$this->input()`) — иначе генерация упадёт или будет неверной |
-| Правила разбирает как **массив** (или строку через `\|`), тип угадывает по строковым токенам `integer` / `numeric` / `boolean` / `array` / `image` / `file` / `mimes` | В каждом правиле есть явный токен типа; правила пишутся массивом |
-| `min:`/`max:` → `minimum`/`maximum` (`minLength`/`maxLength`), `required` → required, `new Enum(X::class)` и `in:` → enum | Явные границы и enum-правила сразу попадают в документацию |
-| Если в FormRequest есть метод `example()`, его результат становится примером запроса | Можно добавлять `public function example(): array` для сложных тел (в проекте пока не используется) |
-| Коды ответов: ищет `throw new X` в теле метода контроллера **и в теле публичного метода сервиса**, который вызван как `$this->{prop}->{method}(` — **на один уровень**; статус берёт из `bootstrap/app.php` | Контроллер вызывает сервис именно как `$this->xxxService->method(...)` через типизированное свойство. Исключения, брошенные в private-хелперах, Action'ах или во вложенном `getById()`, в документацию **не попадут** |
-| Маппинг читается регуляркой `$e instanceof Class => [Response::HTTP_CONST` | Строка в `match` — строго в этом виде, на одной строке, статус — константой `Response::HTTP_*` |
-| `auth*`-middleware → `security: bearerAuth`; `throttle*` → `429`; FormRequest → `422` | Доступ и лимиты задаются middleware маршрута, а не кодом в контроллере |
-| Тег — по имени контроллера, summary — по имени метода | Говорящие имена методов контроллера (`getByCompany`, `topUp`) |
+| Finds the FormRequest by the **parameter type** of the controller method (reflection) | Input only via a FormRequest in the signature, never `$request->validate()` |
+| Creates the FormRequest with `newInstanceWithoutConstructor()` and calls `rules()` | `rules()` **must not** depend on the request, route or user (`$this->route()`, `$this->user()`, `$this->input()`) — otherwise generation fails or is wrong |
+| Parses rules as an **array** (or a `\|` string) and guesses the type from string tokens `integer` / `numeric` / `boolean` / `array` / `image` / `file` / `mimes` | Every rule has an explicit type token; rules are written as arrays |
+| `min:`/`max:` → `minimum`/`maximum` (`minLength`/`maxLength`), `required` → required, `new Enum(X::class)` and `in:` → enum | Explicit bounds and enum rules show up in the docs |
+| If the FormRequest has an `example()` method, its result becomes the request example | You may add `public function example(): array` for complex bodies (not used in the project yet) |
+| Response codes: looks for `throw new X` in the controller method body **and in the body of the public service method** called as `$this->{prop}->{method}(` — **one level deep**; the status comes from `bootstrap/app.php` | The controller calls the service exactly as `$this->xxxService->method(...)` through a typed property. Exceptions thrown in private helpers, Actions or a nested `getById()` do **not** reach the docs |
+| The mapping is read with the regex `$e instanceof Class => [Response::HTTP_CONST` | The `match` line keeps exactly this form, on one line, status as a `Response::HTTP_*` constant |
+| `auth*` middleware → `security: bearerAuth`; `throttle*` → `429`; FormRequest → `422` | Access and limits are declared by route middleware, not by controller code |
+| Tag from the controller name, summary from the method name | Meaningful controller method names (`getByCompany`, `topUp`) |
 
-Следствие для новых сервисов [гипотеза — подтвердить]: если важно, чтобы код ответа попал в документацию,
-`throw new` должен стоять в теле публичного метода, вызываемого из контроллера (как в `ChargerService::create`).
-Проверки, вынесенные в private-методы (`ChargingSessionService::create` → `getAndValidateConnectorForStart`),
-остаются хорошим стилем, но их коды генератор не увидит.
+Consequence for new services [hypothesis — to confirm]: if a response code must appear in the docs, the `throw new` should
+be in the body of the public method called from the controller (as in `ChargerService::create`). Checks extracted into
+private methods (`ChargingSessionService::create` → `getAndValidateConnectorForStart`) remain good style, but the generator
+will not see their codes.
 
-## Сводная таблица решений
+## Decision summary
 
-| Решение | Проблема, которую решает | Компромисс | Статус |
+| Decision | Problem it solves | Trade-off | Status |
 |---|---|---|---|
-| Controller → Service → Repository | Логика переиспользуется из HTTP, cron, OCPP | Тонкие сервисы-прокси для CRUD | паттерн |
-| Без интерфейсов репозиториев | Меньше кода при единственной реализации | Тесты мокают конкретный класс | [гипотеза] |
-| Пустые доменные исключения + `match` | Сервис не знает HTTP, тексты и коды в одном месте | Длинный `match` в `bootstrap/app.php` | паттерн |
-| `existsById(..., lock)` в сервисе | Гонки, доменные тексты ошибок | Лишний запрос | [гипотеза] |
-| `DEFAULT_SELECT_COLUMNS` везде | Производительность + работа `HasTranslations` | Константу нужно поддерживать при изменении схемы | подтверждено |
-| `defer()` вместо очередей | Нет воркера и Redis, ответ не ждёт сети | Нет ретраев | подтверждено |
-| MySQL spatial/FULLTEXT вместо PostGIS/Elastic | Одна БД | Потолок качества поиска | подтверждено |
-| Bulk upsert + поштучный fallback | Ежеминутный cron на тысячах сессий | Сложный код | паттерн |
-| Репозиторий максимально тупой | Поведение меняется только в сервисе; запрос можно переписать без риска | Больше кода в сервисах | подтверждено |
-| Enum в коде, колонка `string` | Новое значение — один `case`, без миграции; нет сырых строк | БД не валидирует значения | подтверждено |
-| Ownership → 404 | Не раскрывать существование чужих данных | Менее информативно | [гипотеза] |
-| Один токен на пользователя (`deleteTokens` при входе) | Одно устройство — одна сессия | Нельзя войти с двух устройств | [гипотеза] |
+| Controller → Service → Repository | Logic reused from HTTP, cron, OCPP | Thin proxy services for CRUD | confirmed |
+| DB queries and external HTTP only in repositories | One place to review indexes, columns, locks; services free of infrastructure | More repository methods | confirmed |
+| Repository as dumb as possible | Behaviour changes only in services; a query can be rewritten safely | More code in services | confirmed |
+| No repository interfaces | Less code with a single implementation | Tests mock the concrete class | [hypothesis] |
+| Empty domain exceptions + `match` | Service knows no HTTP; texts and codes in one place | Long `match` in `bootstrap/app.php` | pattern |
+| `existsById(..., lock)` in the service | Races, domain error texts, no DB access in FormRequests | An extra query | confirmed (no DB outside repos) |
+| `DEFAULT_SELECT_COLUMNS` everywhere | Performance + `HasTranslations` + nothing unselected can leak | The constant must follow schema changes | confirmed |
+| Indexed, bounded, keyset queries | Milliseconds at any table size | Index per access path | confirmed |
+| Computed state instead of denormalized columns | No drift between copies | Computation at read time | confirmed |
+| `defer()` instead of queues | No worker or Redis; response does not wait for the network | No retries | confirmed |
+| MySQL spatial/FULLTEXT instead of PostGIS/Elastic | One database | Search quality ceiling | confirmed |
+| Bulk upsert + one-by-one fallback | Per-minute cron over thousands of sessions | Complex code | pattern |
+| Enum in code, `string` column | New value = one `case`, no migration; no raw strings | The DB does not validate values | confirmed |
+| Stateless `readonly` classes | No cross-request state or leaks on Octane | No per-object caching | confirmed (no leaks) |
+| Ownership → 404 | Do not reveal existence of others' data | Less informative | [hypothesis] |
+| One token per user (`deleteTokens` on login) | One device — one session | Cannot log in on two devices | [hypothesis] |

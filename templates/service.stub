@@ -10,8 +10,9 @@ use App\Repositories\{{EntityName}}Repository;
 use App\Repositories\{{ParentName}}Repository;
 use Illuminate\Contracts\Pagination\CursorPaginator;
 
-// Сервис: вся бизнес-логика. Никаких auth()/request()/abort()/response()/Eloquent/DB::.
-// readonly class → свойства private БЕЗ повторного readonly.
+// Service: all business logic. No auth()/request()/abort()/response(), no Eloquent/DB::/Http:: — data and external calls via repositories.
+// The acting user arrives as an argument; ownership is checked here (foreign id → NotFound).
+// readonly class → private properties WITHOUT a repeated readonly (stateless: safe on Octane).
 readonly class {{EntityName}}Service
 {
     public function __construct(
@@ -28,6 +29,7 @@ readonly class {{EntityName}}Service
         return $this->{{entityName}}Repository->cursorPaginateBy{{ParentName}}Id(${{parentName}}Id);
     }
 
+    // DECISION: for user-owned entities add `int $authUserId` and check `${{entityName}}->user_id !== $authUserId` → NotFound.
     public function getById(int $id): {{EntityName}}
     {
         ${{entityName}} = $this->{{entityName}}Repository->findById($id);
@@ -76,8 +78,8 @@ readonly class {{EntityName}}Service
         }
     }
 
-    // Проверка, повторяющаяся в create и update, — один private-метод (DRY).
-    // Если такая же проверка нужна в другом сервисе — выносить в Action, не копировать.
+    // A check repeated in create and update is one private method (DRY).
+    // If another service needs the same check — extract it into an Action, never copy it.
     private function validate{{ParentName}}Exists(int ${{parentName}}Id): void
     {
         if (! $this->{{parentName}}Repository->existsById(${{parentName}}Id, true)) {

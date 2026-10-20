@@ -5,19 +5,20 @@ namespace App\Repositories;
 use App\Models\{{EntityName}};
 use Illuminate\Contracts\Pagination\CursorPaginator;
 
-// Репозиторий: только чтение/запись. Возвращает ?Model | bool | int | Collection | Paginator.
-// НЕ бросает доменные исключения, НЕ принимает бизнес-решений.
-// Максимально тупой: никаких бизнес-if, __(), выбора языка/получателя, бизнес-сортировки — это всё в сервисе.
+// Repository: the ONLY place for DB queries (and, for gateways, external HTTP). Returns ?Model | bool | int | Collection | Paginator.
+// Never throws domain exceptions, never makes business decisions.
+// As dumb as possible: no business if, no __(), no language/recipient choice, no business sorting — all of that is the service's.
+// Every query: DEFAULT_SELECT_COLUMNS, bounded, served by an index (add it in the migration), keyset pagination only.
 readonly class {{EntityName}}Repository
 {
     public function cursorPaginateBy{{ParentName}}Id(int ${{parentName}}Id): CursorPaginator
     {
         return {{EntityName}}::where('{{parent_id}}', ${{parentName}}Id)
             ->select({{EntityName}}::DEFAULT_SELECT_COLUMNS)
-            // РЕШЕНИЕ: связи только с select через замыкание:
+            // DECISION: relations only with a select via a closure:
             // ->with(['{{parentName}}' => fn (Relation $query) => $query->select({{ParentName}}::DEFAULT_SELECT_COLUMNS)])
-            ->latest('id')
-            ->cursorPaginate(20);
+            ->latest('id')                 // index: ['{{parent_id}}', 'id'] (or a plain {{parent_id}} index)
+            ->cursorPaginate(20);          // keyset — never paginate()/OFFSET
     }
 
     public function findById(int $id, bool $lockForUpdate = false): ?{{EntityName}}
@@ -36,7 +37,7 @@ readonly class {{EntityName}}Repository
     {
         return {{EntityName}}::create($data);
 
-        // РЕШЕНИЕ: если есть переводы — несколько записей → своя транзакция и перечитывание:
+        // DECISION: with translations — several writes → its own transaction and a re-read:
         // return transaction(function () use ($data) {
         //     ${{entityName}} = {{EntityName}}::create($data);
         //     ${{entityName}}->syncTranslations($data);

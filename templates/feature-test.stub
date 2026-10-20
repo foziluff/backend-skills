@@ -10,8 +10,8 @@ use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 // tests/Feature/{{EntityName}}/Store{{EntityName}}Test.php
-// Один файл — один эндпоинт. Методы: test_{что}_{результат}_when_{условие}.
-// Покрыть: happy path · каждое доменное исключение сервиса · доступ (401/403/404) · границы валидации.
+// One file = one endpoint. Methods: test_{what}_{result}_when_{condition}.
+// Cover: happy path · every domain exception of the service · access (401/403/404 ownership) · privileged fields · validation bounds.
 class Store{{EntityName}}Test extends TestCase
 {
     public function test_store_creates_{{entity_name}}(): void
@@ -24,7 +24,7 @@ class Store{{EntityName}}Test extends TestCase
             'label' => 'First',
         ]);
 
-        $response->assertCreated()   // РЕШЕНИЕ: 201, если репозиторий вернул модель из Model::create(); 200, если перечитал через findById
+        $response->assertCreated()   // DECISION: 201 if the repository returned the model from Model::create(); 200 if it re-read it via findById
             ->assertJsonPath('label', 'First')
             ->assertJsonPath('{{parent_id}}', ${{parentName}}->id);
         $this->assertDatabaseHas('{{entity_names}}', ['{{parent_id}}' => ${{parentName}}->id, 'label' => 'First']);
@@ -56,7 +56,7 @@ class Store{{EntityName}}Test extends TestCase
 
         $this->postJson('/api/{{entity-names}}', [])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['{{parent_id}}', 'label']);   // форма → без stopOnFirstFailure
+            ->assertJsonValidationErrors(['{{parent_id}}', 'label']);   // a form → without stopOnFirstFailure
     }
 
     public function test_store_returns_403_for_non_admin(): void

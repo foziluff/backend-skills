@@ -1,6 +1,6 @@
 ---
 name: foziluff-backend-style
-description: Use when writing, refactoring or reviewing backend code in foziluff's style on PHP 8.3 / Laravel 13 (Octane + Swoole, Sanctum, MySQL) — Controller → Service → dumb Repository layers, domain exceptions, FormRequest, Resource, enums instead of raw strings, transactions with lockForUpdate, security in every layer.
+description: Use when writing, refactoring or reviewing backend code in foziluff's style on PHP 8.3 / Laravel 13 (Octane + Swoole, Sanctum, MySQL) — Controller → Service → dumb Repository layers, domain exceptions, FormRequest, Resource, enums instead of raw strings, transactions with lockForUpdate, millisecond queries at billion-row scale, no denormalization drift, no memory leaks, security in every layer.
 ---
 
 # foziluff backend style
@@ -24,14 +24,25 @@ Markers used in the text:
    - **Service — all business logic:** "is it allowed", "how much to charge", "whom to notify and with what", "in which order".
    - **Repository — as dumb as possible, works with data only:** fetch / write / count / check existence of exactly what was
      asked. No business `if`, no language choice, no text building, no business sorting.
+   - **Database queries and outgoing HTTP to external systems — strictly in repositories, nowhere else**: not in services,
+     controllers, middleware, FormRequests (no `exists:`/`unique:`), Resources or model accessors.
    *Why:* business rules live in one place and can be called from HTTP, cron and the OCPP handler alike
    (`StopChargingSessionAction` is called from all three), and a repository can be rewritten (another query, another index)
    without changing behaviour.
 
-2. **Fetch only what you return.** Explicit `select(Model::DEFAULT_SELECT_COLUMNS)`, eager-loads with selected columns,
-   `preventLazyLoading` outside production, and only then a Resource. **[confirmed]**
-   *Why:* optimisation is built into the query when it is written, not later; N+1 is caught in dev.
-   Columns that are never selected can never leak.
+2. **Milliseconds on billions of rows, zero leaks.** **[confirmed]**
+   - Every query is designed so its cost depends on the result page, not the table: a matching index for every
+     `where` + `order by`, keyset (`cursorPaginate`) instead of `OFFSET`, `exists()` instead of `COUNT(*)`, every read bounded,
+     no index-breaking expressions, `EXPLAIN` before merging.
+   - Fetch only what you return: explicit `select(Model::DEFAULT_SELECT_COLUMNS)`, eager-loads with selected columns,
+     `preventLazyLoading` outside production, and only then a Resource.
+   - Avoid denormalization; compute derived state (`Charger::is_online`, `Connector::status`). If a stored copy is unavoidable
+     (`users.balance`), it has one write path, changes in the same transaction as its source of truth, under a row lock,
+     and stays reconstructible — no drift possible.
+   - Memory leaks are unacceptable on long-living Octane workers: stateless `readonly` objects, nothing registered per request,
+     chunked processing, `defer()` captures only snapshots.
+   *Why:* the code must keep working as data grows, without rewrites or extra infrastructure; columns that are never
+   selected can never leak. → [references/performance.md](references/performance.md)
 
 3. **Integrity through locks, not hope.** Every "check → act" scenario (limits, uniqueness, balance, connector occupancy)
    runs in `transaction()` with `lockForUpdate`.
@@ -102,8 +113,9 @@ Details: [references/architecture.md](references/architecture.md).
   → [architecture.md](references/architecture.md#controller)
 - The service knows nothing about HTTP: no `request()`, `auth()`, `abort()`, `response()`. The user comes in as an argument.
   → [architecture.md](references/architecture.md#service)
-- Eloquent and `DB::` are used **only** in repositories (and migrations/seeders). Raw SQL only in repositories.
-  → [data-layer.md](references/data-layer.md#repository)
+- Eloquent, `DB::` and raw SQL are used **only** in repositories (and migrations/seeders). Outgoing HTTP to external systems —
+  **only** in gateway repositories. Nowhere else. **[confirmed]**
+  → [performance.md](references/performance.md#data-access)
 - External systems (WS gateway, Firebase, SMS) are hidden behind a gateway repository; network calls go through `defer()`.
   → [architecture.md](references/architecture.md#repository-gateway)
 - An Action is for an operation called by ≥2 services/entry points. The method is always `handle`. **[confirmed]**
@@ -141,6 +153,13 @@ Details: [references/architecture.md](references/architecture.md).
   (legacy: `>= 100` in `ChargerService::create`)
 - Mass updates: `chunkById` + `upsert`; if a batch fails, fall back to one-by-one processing.
   → [data-layer.md](references/data-layer.md)
+
+### Performance and memory
+- Every new/changed query: serving index in the same change, `EXPLAIN` without full scans; keyset pagination only;
+  no `COUNT(*)` on big tables; no functions on indexed columns, no leading `%` in `LIKE`, careful with `OR`.
+- No new denormalized columns unless unavoidable — then one write path, same transaction, row lock, reconstructible.
+- No mutable/static per-request state; register macros/listeners only once; `chunkById` for big sets; small `defer()` captures.
+  → [performance.md](references/performance.md)
 
 ### Validation
 - One FormRequest per action: `Requests/{Entity}/{Verb}{Entity}Request`. Rules as arrays, every number/string has
@@ -198,7 +217,7 @@ Details: [references/architecture.md](references/architecture.md).
 **Layers**
 - [ ] Controller: only `validated()`/`integer()`/`float()` → service → `Resource::make()/collection()`.
 - [ ] The service does not call `auth()`, `request()`, `abort()`, `response()`; the user/id came in as an argument.
-- [ ] No Eloquent/`DB::` outside `app/Repositories` (and migrations/seeders).
+- [ ] No Eloquent/`DB::`/raw SQL and no external HTTP outside `app/Repositories` (and migrations/seeders).
 - [ ] No business `if`, text building, language/recipient choice or business sorting in the repository — data only.
 - [ ] Repeated logic is extracted into a private method/Action, not copied (DRY).
 
@@ -211,6 +230,12 @@ Details: [references/architecture.md](references/architecture.md).
 - [ ] Not a single raw string value (`'admin'`, `'Charging'`, `'Accepted'`, `'UserUpdated'`) — only enums/constants;
       a new column with a fixed set of values = `string` + enum + model cast.
 - [ ] Migration: `foreignId()->constrained()->cascadeOnDelete()`, `softDeletes()` for business entities, indexes matching real `where`s.
+
+**Performance and memory**
+- [ ] Each new/changed query has its index (migration in the same change) and a clean `EXPLAIN`; reads are bounded; no `OFFSET`/`COUNT(*)` on big tables.
+- [ ] No new denormalization — or one write path + same transaction + row lock + reconciliation.
+- [ ] No state on long-living objects, nothing registered per request, `defer()` captures only snapshots.
+  Full list: [performance.md](references/performance.md#performance-checklist-every-change).
 
 **Security**
 - [ ] Right route group; `throttle` on authentication and expensive public routes.
@@ -244,6 +269,10 @@ Details: [references/architecture.md](references/architecture.md).
 | `response()->json($model)` | The whole model leaks out; the contract changes with the schema |
 | `Model::all()`, `->get()` without `select` | Extra columns and translations; contradicts "fetch only what you return" |
 | Lazy loading of relations | Fails in dev (`preventLazyLoading`), N+1 in prod |
+| A DB query or external HTTP call in a service, controller, middleware, FormRequest, Resource or accessor | Only repositories talk to the DB and external systems [confirmed] |
+| `paginate()`/`OFFSET`, `COUNT(*)` on a big table, a query without a serving index | Cost grows with the table, not the page [confirmed] |
+| A denormalized copy updated outside the source-of-truth transaction (later, in `defer()`, in a listener, from two places) | Drift between copies [confirmed] |
+| Caches/arrays on services, `static` accumulators, registering macros/listeners per request | Memory leak on Octane workers [confirmed] |
 | `exists:` in a FormRequest instead of a check in the service | Check outside the transaction/lock, no domain text [hypothesis] |
 | `throw new HttpException`/`abort()` for business errors | Only domain classes + the central `match` |
 | An exception without a `match` line and a translation | The user gets a 500 instead of a clear answer |
@@ -275,6 +304,7 @@ Details: [references/architecture.md](references/architecture.md).
 | A new business error, HTTP status, response format, pagination, logging | [references/error-handling.md](references/error-handling.md) |
 | Migration, model, query, transaction, locks, validation, translations, money | [references/data-layer.md](references/data-layer.md) |
 | Authentication, authorization, mass assignment, secrets, injection, abuse limits | [references/security.md](references/security.md) |
+| Where queries may live, indexes, pagination at scale, denormalization, memory leaks | [references/performance.md](references/performance.md) |
 | Writing a test, setting up the test environment | [references/testing.md](references/testing.md) |
 | Reference code with explanations and anti-examples | [references/examples.md](references/examples.md) |
 | Creating a new CRUD/endpoint from scratch | [templates/README.md](templates/README.md) |
@@ -283,7 +313,7 @@ Details: [references/architecture.md](references/architecture.md).
 
 1. Migration → enum(s) for fixed sets → model → factory → seeder.
 2. Exceptions (`XxxNotFoundException` and business errors) → `match` in `bootstrap/app.php` → keys in all three `lang` files.
-3. Repository (data only, `lockForUpdate` flags).
+3. Repository (data only, `lockForUpdate` flags) + the indexes its queries need; check `EXPLAIN`.
 4. Service (transactions, checks, ownership, exceptions).
 5. FormRequests (`bail` policy, bounds, no privileged fields) → Resource → controller → routes (right group, throttle).
 6. Feature tests → `pint` → `phpstan` → `php artisan test` → security checklist → a logical commit without traces of AI.

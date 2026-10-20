@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-// РЕШЕНИЕ: если есть переводимые поля — use App\Traits\HasTranslations; и добавить в use-список трейтов
+// DECISION: if there are translatable fields — use App\Traits\HasTranslations; and add it to the trait list
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,26 +18,28 @@ class {{EntityName}} extends Model
 {
     use HasFactory, SoftDeletes;
 
-    // РЕШЕНИЕ: бизнес-лимиты и параметры — типизированные константы, никаких магических чисел в сервисе
+    // Business limits and parameters are typed constants — no magic numbers in services
     public const int MAX_PER_{{PARENT_NAME}} = 100;
 
+    // Explicit whitelist. Privileged fields (role, balance…) may be fillable, but must never appear in a user-facing FormRequest.
     protected $fillable = [
         '{{parent_id}}',
         'label',
     ];
 
-    // РЕШЕНИЕ: переводимые поля (если используется HasTranslations)
+    // DECISION: translatable fields (if HasTranslations is used)
     // protected array $translatable = [
     //     'name',
     // ];
 
-    // Только то, что реально нужно клиенту. Переводимые поля тоже перечисляются здесь.
+    // Only what the client really needs. Translatable fields are listed here too.
     public const array DEFAULT_SELECT_COLUMNS = [
         'id',
         '{{parent_id}}',
         'label',
     ];
 
+    // Timestamps, deleted_at and every internal/sensitive field.
     protected $hidden = [
         'created_at',
         'updated_at',
@@ -51,7 +53,7 @@ class {{EntityName}} extends Model
             '{{parent_id}}' => 'integer',
             // 'price' => 'float',
             // 'is_active' => 'boolean',
-            // 'status' => {{EntityName}}Status::class,
+            // 'status' => {{EntityName}}Status::class,   // every fixed-set column is cast to its enum
             // 'started_at' => 'datetime',
         ];
     }
@@ -61,7 +63,8 @@ class {{EntityName}} extends Model
         return $this->belongsTo({{ParentName}}::class);
     }
 
-    // РЕШЕНИЕ: доменная математика — public static, чтобы одна формула использовалась в сервисе, Action и accessor
+    // DECISION: domain math is public static, so one formula is shared by the service, the Action and accessors.
+    // Accessors compute only from loaded data — no queries, no I/O.
     // public static function calculateX(int $a, float $b): float
     // {
     //     return round($a * $b, 2);

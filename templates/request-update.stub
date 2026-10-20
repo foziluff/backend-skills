@@ -4,8 +4,8 @@ namespace App\Http\Requests\{{EntityName}};
 
 use Illuminate\Foundation\Http\FormRequest;
 
-// Те же правила и границы, что в Store, но 'sometimes' вместо 'required' (PATCH = частичное обновление).
-// Форма → без $stopOnFirstFailure и без 'bail'.
+// The same rules and bounds as Store, with 'sometimes' instead of 'required' (PATCH = partial update).
+// A form → without $stopOnFirstFailure and without 'bail'. No privileged fields.
 class Update{{EntityName}}Request extends FormRequest
 {
     public function rules(): array

@@ -1,10 +1,11 @@
-// routes/api.php — добавить use и маршруты в нужную группу.
+// routes/api.php — add the use and the routes to the right group.
 use App\Http\Controllers\{{EntityName}}Controller;
 
-// РЕШЕНИЕ: группа доступа
-//   публичное чтение для приложения        → вверху файла, вне групп
-//   действия пользователя                  → внутри Route::middleware(['auth:sanctum'])
-//   управление (CRUD админки)              → внутри Route::middleware('role:'.Role::ADMIN->value)
+// DECISION: access group
+//   public reads for the app      → top of the file, outside groups, with ->middleware('throttle:…') if expensive
+//   user actions                  → inside Route::middleware(['auth:sanctum'])
+//   management (admin CRUD)       → inside Route::middleware('role:'.Role::ADMIN->value)
+// Never add dev/debug routes.
 
 Route::middleware(['auth:sanctum'])->group(function (): void {
     Route::middleware('role:'.Role::ADMIN->value)->group(function (): void {
@@ -14,10 +15,10 @@ Route::middleware(['auth:sanctum'])->group(function (): void {
         Route::patch('{{entity-names}}/{id}', [{{EntityName}}Controller::class, 'update'])->whereNumber('id');
         Route::delete('{{entity-names}}/{id}', [{{EntityName}}Controller::class, 'destroy'])->whereNumber('id');
 
-        // Действие над ресурсом — POST с глаголом:
+        // An action on a resource — POST with a verb:
         // Route::post('{{entity-names}}/{id}/{{verb}}', [{{EntityName}}Controller::class, '{{verb}}'])->whereNumber('id');
     });
 });
 
-// Чувствительный публичный маршрут — с throttle:
+// A sensitive public route — with throttle:
 // Route::post('send-code', [UserController::class, 'sendCode'])->middleware('throttle:1,1');

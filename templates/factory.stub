@@ -10,7 +10,7 @@ class {{EntityName}}Factory extends Factory
     public function definition(): array
     {
         return [
-            // Связи — через factory, а не inRandomOrder()->first(): тесты должны быть детерминированными.
+            // Relations via factories, not inRandomOrder()->first(): tests must be deterministic.
             '{{parent_id}}' => {{ParentName}}::factory(),
             'label' => fake()->words(2, true),
         ];

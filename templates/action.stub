@@ -6,9 +6,9 @@ use App\Repositories\{{EntityName}}Repository;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
-// Action — операция, которую вызывают ≥2 сервиса/точки входа (HTTP, scheduler, OCPP).
-// Единственный публичный метод — handle.
-// РЕШЕНИЕ: утилита без зависимостей → `public static function handle(...)` и без конструктора.
+// Action — an operation called by ≥2 services/entry points (HTTP, scheduler, OCPP).
+// The only public method is handle. Data and external calls only through repositories.
+// DECISION: a utility without dependencies → `public static function handle(...)` and no constructor.
 readonly class {{Verb}}{{EntityName}}Action
 {
     public function __construct(
@@ -19,13 +19,13 @@ readonly class {{Verb}}{{EntityName}}Action
     {
         try {
             return transaction(function () use ($id) {
-                // 1. достать с lockForUpdate и проверить состояние → доменное исключение
-                // 2. расчёты (формулы — static-методы модели), round(..., 2) для денег
-                // 3. записи через репозитории
-                // 4. побочные эффекты через репозитории-шлюзы (внутри defer)
+                // 1. fetch with lockForUpdate and check the state → domain exception (idempotency)
+                // 2. calculations (formulas are static model methods), round(..., 2) for money
+                // 3. writes through repositories; a denormalized value changes here, together with its source of truth
+                // 4. side effects through gateway repositories (inside defer, with snapshot data)
             });
         } catch (Throwable $e) {
-            // РЕШЕНИЕ: log-and-rethrow — только для денежных/зарядных операций (канал charging)
+            // DECISION: log-and-rethrow only for money/charging operations (the charging channel); ids only, no personal data
             Log::channel('charging')->error('Failed to {{verb}} {{entity_name}}: '.$e->getMessage(), [
                 '{{entity_name}}_id' => $id,
                 'exception' => get_class($e),

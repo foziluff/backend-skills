@@ -1,22 +1,22 @@
 // ── bootstrap/app.php ─────────────────────────────────────────────
-// 1) импорт вверху файла (сортировка по алфавиту):
+// 1) import at the top of the file (alphabetical order):
 use App\Exceptions\{{EntityName}}NotFoundException;
 use App\Exceptions\{{EntityName}}LimitReachedException;
 
-// 2) строки в match (true) внутри mapExceptionToResponseData():
-//    РЕШЕНИЕ: статус по таблице references/error-handling.md
-//      нет/чужая → 404 · бизнес-правило/лимит/состояние → 422 · конфликт с состоянием → 409
-//      нет денег → 402 · физическое предусловие → 412
+// 2) lines inside match (true) in mapExceptionToResponseData() — exactly this one-line form (the Swagger generator parses it):
+//    DECISION: status from the table in references/error-handling.md
+//      missing/foreign → 404 · business rule/limit/state → 422 · conflict with state → 409
+//      no money → 402 · physical precondition → 412
 $e instanceof {{EntityName}}NotFoundException => [Response::HTTP_NOT_FOUND, __('all.{{entity_name}}_not_found')],
 $e instanceof {{EntityName}}LimitReachedException => [Response::HTTP_UNPROCESSABLE_ENTITY, __('all.{{entity_name}}_limit_reached')],
 
 // ── lang/ru/all.php ───────────────────────────────────────────────
-'{{entity_name}}_not_found' => '{{Сущность}} не найден(а)',
-'{{entity_name}}_limit_reached' => 'Достигнут лимит: {{сущность}}',
+'{{entity_name}}_not_found' => '{{Russian translation}}',
+'{{entity_name}}_limit_reached' => '{{Russian translation}}',
 
 // ── lang/tg/all.php ───────────────────────────────────────────────
-'{{entity_name}}_not_found' => '{{перевод на таджикский}}',
-'{{entity_name}}_limit_reached' => '{{перевод на таджикский}}',
+'{{entity_name}}_not_found' => '{{Tajik translation}}',
+'{{entity_name}}_limit_reached' => '{{Tajik translation}}',
 
 // ── lang/en/all.php ───────────────────────────────────────────────
 '{{entity_name}}_not_found' => '{{Entity}} not found',

@@ -14,22 +14,25 @@ return new class extends Migration
             $table->id();
             $table->foreignId('{{parent_id}}')->constrained()->cascadeOnDelete();
 
-            // РЕШЕНИЕ: типы колонок
-            //   деньги          → $table->decimal('price', 36, 2);
-            //   энергия/счётчик → $table->unsignedBigInteger('watts');
-            //   статус/тип/роль → $table->string('status');            // + backed enum в app/Enums (templates/enum.stub)
-            //                     НИКОГДА $table->enum(): набор значений живёт в коде, новое значение — без миграции
-            //                     дефолт — из enum: ->default({{EntityName}}Status::ACTIVE->value)
-            //   флаг            → $table->boolean('is_active')->default(false);
-            //   момент времени  → $table->timestamp('started_at')->nullable();
-            //   переводимые поля (name, address…) колонками НЕ создаются — они в таблице translations
+            // DECISION: column types
+            //   money             → $table->decimal('price', 36, 2);
+            //   energy/counter    → $table->unsignedBigInteger('watts');
+            //   status/type/role  → $table->string('status');            // + backed enum in app/Enums (templates/enum.stub)
+            //                       NEVER $table->enum(): the set of values lives in code, a new value needs no migration
+            //                       default from the enum: ->default({{EntityName}}Status::ACTIVE->value)
+            //   flag              → $table->boolean('is_active')->default(false);
+            //   point in time     → $table->timestamp('started_at')->nullable();
+            //   translatable fields (name, address…) are NOT columns — they live in the translations table
+            //   derived values (totals, counters, statuses) are computed, not stored (references/performance.md#denormalization)
             $table->string('label');
 
-            $table->softDeletes();   // РЕШЕНИЕ: убрать, если сущность не бизнесовая (лог, справочник без удаления)
+            $table->softDeletes();   // DECISION: drop for non-business entities (logs, dictionaries that are never deleted)
             $table->timestamps();
 
-            // РЕШЕНИЕ: составные индексы строго под where из репозитория, в том же порядке колонок
-            // $table->index(['{{parent_id}}', 'status']);
+            // DECISION: an index for EVERY repository query: equality columns first, then range/sort, same order as the query.
+            // Check each query with EXPLAIN (no full scan, no filesort on large sets).
+            // $table->index(['{{parent_id}}', 'id']);
+            // $table->index(['status', 'started_at']);
         });
     }
 

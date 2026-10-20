@@ -10,9 +10,10 @@ use App\Http\Resources\Client\EmptyResource;
 use App\Http\Resources\Client\{{EntityName}}Resource;
 use App\Services\{{EntityName}}Service;
 
-// Контроллер: одна строка на метод. Никаких if, Eloquent и бизнес-проверок.
-// Всегда Resource — в том числе для админки и пустых ответов.
-// auth()->user()/auth()->id() — только здесь, в сервис передаются аргументом.
+// Controller — HTTP layer only: one line per method. No if, no Eloquent, no business checks.
+// Always a Resource — admin endpoints and empty responses included.
+// Only validated() data reaches the service (never $request->all()).
+// auth()->user()/auth()->id() — only here, passed to the service as arguments (never a user_id from the request).
 class {{EntityName}}Controller extends Controller
 {
     public function __construct(

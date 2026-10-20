@@ -4,7 +4,7 @@ namespace App\Http\Requests\{{EntityName}};
 
 use Illuminate\Foundation\Http\FormRequest;
 
-// Фильтр / query-параметры → останавливаемся на первой ошибке.
+// A filter / query parameters → stop on the first error.
 class Index{{EntityName}}Request extends FormRequest
 {
     protected $stopOnFirstFailure = true;

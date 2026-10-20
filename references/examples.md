@@ -1,13 +1,14 @@
-# Эталонные примеры с разбором
+# Reference examples with explanations
 
-Все фрагменты, кроме целевого кода в примере 8 и примера 9, взяты из проекта; путь указан над каждым.
-Места, где реальный код расходится с целевым правилом, помечены **legacy → как надо**.
+All fragments come from the project (the path is given above each one), except the target code in example 8 and the test
+in example 10, which are written by the rules of this skill. Where real code differs from the target rule it is marked
+**legacy → target**.
 
 ---
 
-## 1. Эндпоинт целиком через все слои: `POST /api/chargers`
+## 1. A whole endpoint through all layers: `POST /api/chargers`
 
-### Маршрут
+### Route
 `routes/api.php`
 ```php
 Route::middleware(['auth:sanctum'])->group(function (): void {
@@ -18,8 +19,9 @@ Route::middleware(['auth:sanctum'])->group(function (): void {
     });
 });
 ```
-- Доступ задаётся **группой**, а не проверкой в контроллере: по файлу маршрутов сразу видно, что создавать зарядники может только админ.
-- `whereNumber('id')` — нечисловой id отсекается роутером (404) ещё до контроллера, поэтому сигнатура `int $id` безопасна.
+- Access is declared by a **group**, not by a check in the controller: the routes file shows at a glance that only an admin
+  can create chargers. The role is an enum value, not the string `'admin'`.
+- `whereNumber('id')` — a non-numeric id is cut off by the router (404) before the controller, so the `int $id` signature is safe.
 
 ### FormRequest
 `app/Http/Requests/Charger/StoreChargerRequest.php`
@@ -38,11 +40,12 @@ class StoreChargerRequest extends FormRequest
     }
 }
 ```
-- Проверяются только **форма и границы**. Ни `exists:points,id`, ни `unique:chargers,remote_code` — это делает сервис под блокировкой.
-- **legacy → как надо:** это многополевая админ-форма, поэтому по политике валидации **убрать** `$stopOnFirstFailure` и `bail`,
-  чтобы фронт получил все ошибки сразу.
+- Only **shape, types and bounds** are checked. No `exists:points,id` and no `unique:chargers,remote_code` — those would be
+  DB queries outside a repository and outside the lock; the service does them.
+- **legacy → target:** this is a multi-field admin form, so by the validation policy **remove** `$stopOnFirstFailure` and `bail`
+  so the frontend gets all errors at once.
 
-### Контроллер
+### Controller
 `app/Http/Controllers/ChargerController.php`
 ```php
 public function store(StoreChargerRequest $request): JsonResponse
@@ -50,8 +53,8 @@ public function store(StoreChargerRequest $request): JsonResponse
     return response()->json($this->chargerService->create($request->validated()));
 }
 ```
-- Одна строка: данные → сервис → ответ.
-- **legacy → как надо:**
+- One line: data → service → response.
+- **legacy → target:**
   ```php
   public function store(StoreChargerRequest $request): ChargerResource
   {
@@ -59,7 +62,7 @@ public function store(StoreChargerRequest $request): JsonResponse
   }
   ```
 
-### Сервис
+### Service
 `app/Services/ChargerService.php`
 ```php
 public function create(array $data): Charger
@@ -81,12 +84,13 @@ public function create(array $data): Charger
     });
 }
 ```
-- Три проверки «можно ли» → одна запись, всё внутри `transaction()` и с `lockForUpdate` (второй аргумент `true`).
-  Два одновременных запроса не создадут 101-й зарядник и не создадут дубль `remote_code`.
-- Каждое нарушение — свой тип исключения → свой статус и текст.
-- **legacy → как надо:** `>= 100` → `>= Charger::MAX_PER_POINT` (константа модели).
+- Three "is it allowed" checks → one write, all inside `transaction()` with `lockForUpdate` (the second argument `true`).
+  Two concurrent requests will not create a 101st charger or a duplicate `remote_code`.
+- Every violation is its own exception type → its own status and text.
+- All data access goes through repositories; the service has no Eloquent.
+- **legacy → target:** `>= 100` → `>= Charger::MAX_PER_POINT` (a model constant).
 
-### Репозиторий
+### Repository
 `app/Repositories/ChargerRepository.php`
 ```php
 public function existsByRemoteCode(string $remoteCode, bool $lockForUpdate = false): bool
@@ -105,11 +109,12 @@ public function create(array $data): Charger
     return Charger::create($data);
 }
 ```
-- `withTrashed()`: в миграции у `remote_code` стоит `unique()`, а мягко удалённая строка по-прежнему занимает значение.
-  Проверка учитывает это так же, как это делает БД.
-- Репозиторий возвращает `bool`/модель и ничего не решает.
+- `withTrashed()`: the migration has `unique()` on `remote_code`, and a soft-deleted row still occupies the value.
+  The check mirrors what the DB enforces.
+- `exists()` on a unique-indexed column — a single index lookup at any table size.
+- The repository returns `bool`/a model and decides nothing.
 
-### ❌ Как НЕ надо
+### ❌ Not like this
 ```php
 public function store(Request $request)
 {
@@ -126,15 +131,15 @@ public function store(Request $request)
     return Charger::create($data);
 }
 ```
-Почему отклоняется:
-- логика и Eloquent в контроллере — правило не переиспользовать из других точек входа;
-- `unique`/`exists` и подсчёт лимита — вне транзакции и блокировки: два параллельных запроса пройдут оба;
-- у полей нет границ (`max`), формат ошибки свой (`error` вместо `message`), текст не переведён, статус не по таблице;
-- наружу отдаётся сырая модель.
+Why it is rejected:
+- logic and Eloquent in the controller — the rule cannot be reused from other entry points; queries outside a repository;
+- `unique`/`exists` and the limit count are outside a transaction and a lock: two parallel requests both pass;
+- no bounds (`max`), a custom error format (`error` instead of `message`), untranslated text, a status outside the table;
+- a raw model is returned.
 
 ---
 
-## 2. Сервис с бизнес-логикой: старт зарядки
+## 2. A service with business logic: starting a charge
 
 `app/Services/ChargingSessionService.php`
 ```php
@@ -204,20 +209,24 @@ private function getAndValidateConnectorForStart(int $connectorId): Connector
 }
 ```
 
-Разбор по блокам:
-- **Публичный метод читается как сценарий**: достать и проверить коннектор → лимит сессий → пользователь → цена → баланс →
-  списание → сессия → команда зарядному устройству → пуш. Детали скрыты в `getAndValidate…`/`validate…`.
-- **`$authUserId` — аргумент**, а не `auth()->id()`: тот же сервис можно вызвать без HTTP.
-- **Порядок блокировок**: сначала коннектор (общий ресурс), потом сессии пользователя, потом сам пользователь.
-- **Цена фиксируется в сессии** (`price_per_kw`, `watts` копируются из коннектора): последующее изменение тарифа
-  не затрагивает идущую зарядку.
-- **Аванс за интервал** (`calculateIntervalCost` → `ChargingSession::getIntervalCost`): формула живёт в модели, сервис её только вызывает.
-- **Синхронная внешняя команда внутри транзакции** — осознанное исключение: если зарядник не принял `RemoteStartTransaction`,
-  исключение откатывает списание и создание сессии. Пуш в приложение — `defer` (внутри `pushActiveSessions`), он уйдёт после коммита.
-- **Log-and-rethrow** снаружи транзакции: инцидент с деньгами виден в канале `charging` с ID, а клиент получает обычный доменный ответ.
-- **legacy → как надо:** `$connector->status === ConnectorStatus::OFFLINE` → сравнение по `->value`.
+Block by block:
+- **The public method reads like a scenario**: fetch and check the connector → session limit → user → price → balance →
+  charge → session → command to the charger → push. Details hide in `getAndValidate…`/`validate…`.
+- **`$authUserId` is an argument**, not `auth()->id()`: the same service can be called without HTTP, and the acting user can
+  never come from the request body.
+- **Lock order**: the connector (shared resource) first, then the user's sessions, then the user.
+- **The price is a snapshot in the session** (`price_per_kw`, `watts` copied from the connector): later tariff changes do not
+  affect a running charge. This is a historical fact, not denormalization.
+- **Prepaid interval** (`calculateIntervalCost` → `ChargingSession::getIntervalCost`): the formula lives in the model, the service only calls it.
+- **Balance (a denormalized total) changes in the same transaction, under the user row lock, via one write path.**
+- **A synchronous external command inside the transaction** is a deliberate exception: if the charger rejects
+  `RemoteStartTransaction`, the exception rolls back the charge and the session. The push to the app is `defer` (inside
+  `pushActiveSessions`), sent after the commit.
+- **Log-and-rethrow** outside the transaction: a money incident is visible in the `charging` channel with ids, and the client
+  gets the normal domain response.
+- **legacy → target:** `$connector->status === ConnectorStatus::OFFLINE` → compare by `->value`.
 
-### ❌ Как НЕ надо
+### ❌ Not like this
 ```php
 public function create(array $data): ChargingSession
 {
@@ -234,15 +243,15 @@ public function create(array $data): ChargingSession
     return ChargingSession::create([...]);
 }
 ```
-- `auth()`/`abort()` в сервисе — привязка к HTTP;
-- нет транзакции и блокировок: два параллельных старта спишут деньги дважды и займут один коннектор;
-- Eloquent и HTTP прямо в сервисе; ошибка шлюза не обработана, списание не откатывается;
-- формула стоимости написана инлайн — не та, что в модели;
-- `Connector::find` без select и с ленивой загрузкой `->charger`.
+- `auth()`/`abort()` in the service — tied to HTTP;
+- no transaction and no locks: two parallel starts charge twice and take the same connector;
+- Eloquent and HTTP directly in the service; a gateway failure is not handled, the charge is not rolled back;
+- the cost formula is inline — not the one in the model;
+- `Connector::find` without a select and with lazy loading of `->charger`.
 
 ---
 
-## 3. Обработка ошибки: от `throw` до JSON
+## 3. Error handling: from `throw` to JSON
 
 `app/Services/ChargingSessionService.php`
 ```php
@@ -265,32 +274,33 @@ class ChargingSessionNotFoundException extends RuntimeException {}
 ```php
 $e instanceof ChargingSessionNotFoundException => [Response::HTTP_NOT_FOUND, __('all.charging_session_not_found')],
 ```
-`lang/ru/all.php`
+`lang/en/all.php`
 ```php
-'charging_session_not_found' => 'Зарядная сессия не найдена',
+'charging_session_not_found' => 'Charging session not found',
 ```
-Ответ: `404 {"message": "Зарядная сессия не найдена"}`. Замысел — язык из `Accept-Language`; но локаль выставляется
-один раз в `AppServiceProvider::boot()`, поэтому под Octane, скорее всего, язык сообщений не меняется от запроса к запросу
-(см. testing.md → «Локаль»).
+Response: `404 {"message": "Charging session not found"}`. The intent is the language from `Accept-Language`; but the locale is
+set once in `AppServiceProvider::boot()`, so under Octane the message language most likely does not change per request
+(see testing.md → "Locale").
 
-Разбор:
-- «Нет» и «чужая» — **одна ветка и один ответ**: клиент не может перебором id узнать, какие сессии существуют. [гипотеза]
-- Сервис бросает тип, ничего не зная о статусе и тексте. Поменять код или текст можно в одном месте.
-- `reportable` возвращает `false` для замапленных исключений → ожидаемые 404 не попадают в лог.
-- Репозиторный `findById` возвращает `?ChargingSession`; решение «это ошибка» принимает сервис.
+Explanation:
+- "Does not exist" and "belongs to someone else" are **one branch and one answer**: a client cannot enumerate ids to learn
+  which sessions exist (IDOR protection). [hypothesis]
+- The service throws a type and knows nothing about status or text. The code or the text changes in one place.
+- `reportable` returns `false` for mapped exceptions → expected 404s do not reach the log.
+- The repository's `findById` returns `?ChargingSession`; the service decides that this is an error.
 
-### ❌ Как НЕ надо
+### ❌ Not like this
 ```php
-$session = ChargingSession::findOrFail($id);          // ModelNotFoundException → стандартный 404 без перевода
+$session = ChargingSession::findOrFail($id);          // query outside a repository; default 404 without translation
 if ($session->user_id !== auth()->id()) {
-    abort(403, 'Forbidden');                           // раскрывает, что сессия существует; abort в сервисе
+    abort(403, 'Forbidden');                           // reveals that the session exists; abort in a service
 }
-throw new \Exception('Session not found');             // 500, текст не переведён, лог засоряется
+throw new \Exception('Session not found');             // 500, untranslated, pollutes the log
 ```
 
 ---
 
-## 4. Транзакция, блокировки и возврат денег: остановка сессии
+## 4. Transaction, locks and refunds: stopping a session
 
 `app/Actions/StopChargingSessionAction.php`
 ```php
@@ -298,7 +308,7 @@ public function execute(int $id, User $authUser, bool $isHardwareInitiated = fal
 {
     try {
         return transaction(function () use ($id, $authUser, $isHardwareInitiated, $meterStop) {
-            $session = $this->getAndValidateSessionForStop($id, $authUser->id);   // findById(..., true) + проверка статуса
+            $session = $this->getAndValidateSessionForStop($id, $authUser->id);   // findById(..., true) + status check
 
             $now = now();
             $isPending = $session->status === ChargingSessionStatus::PENDING;
@@ -328,7 +338,7 @@ public function execute(int $id, User $authUser, bool $isHardwareInitiated = fal
             }
 
             $updatedUser = $this->refundUserBalance($session->user_id, $refundAmount);   // findById(..., true) + update
-            // ... transaction record, session update, notification, remote stop, pushes (все внешние — через defer)
+            // ... ledger record, session update, notification, remote stop, pushes (all external calls via defer)
 
             return $updatedSession;
         });
@@ -343,27 +353,27 @@ public function execute(int $id, User $authUser, bool $isHardwareInitiated = fal
 }
 ```
 
-Разбор:
-- **Action, а не метод сервиса:** остановку вызывают пользователь (HTTP), зарядник (OCPP `StopTransaction`/`StatusNotification`)
-  и cron (низкий баланс, зависшие pending). Флаг `$isHardwareInitiated` говорит, нужно ли слать `RemoteStopTransaction` обратно.
-- **Сессия и пользователь блокируются** (`findById(..., true)`): параллельный стоп из приложения и от зарядника
-  не вернёт деньги дважды; второй вызов получит `InvalidSessionStateException`.
-- **Двойной источник истины для энергии:** счётчик зарядника (`meterStop - meter_start`), если он есть и правдоподобен,
-  иначе — оценка по времени. Решение о fallback принимается в одном месте.
-- **Каждое промежуточное значение денег округлено** `round(..., 2)`.
-- **Pending → CANCELLED с полным возвратом** — отдельная ветка, без транзакции списания.
-- **legacy → как надо:** метод должен называться `handle`; сравнение статуса — через `->value`.
+Explanation:
+- **An Action, not a service method:** stopping is called by the user (HTTP), the charger (OCPP `StopTransaction`/`StatusNotification`)
+  and cron (low balance, stale pending). `$isHardwareInitiated` tells whether to send `RemoteStopTransaction` back.
+- **The session and the user are locked** (`findById(..., true)`): a parallel stop from the app and from the charger cannot refund
+  twice; the second call gets `InvalidSessionStateException` (idempotency through a state check).
+- **Two sources of truth for energy:** the charger meter (`meterStop - meter_start`) if present and plausible, otherwise the
+  time-based estimate. The fallback is decided in one place. Hardware data is cast to `int` (untrusted input).
+- **Every intermediate money value is rounded** with `round(..., 2)`; the balance and the ledger change in one transaction.
+- **Pending → CANCELLED with a full refund** — a separate branch, no withdrawal record.
+- **legacy → target:** the method must be named `handle`; compare statuses by `->value`.
 
-### ❌ Как НЕ надо
+### ❌ Not like this
 ```php
-$session->update(['status' => 'completed', 'finished_at' => now()]);
-$user->update(['balance' => $user->balance + $refund]);    // без транзакции: упадёт между двумя update → деньги потеряны
-FirebasePush::toToken($user->fcm_token)->send();           // синхронно, внутри сценария: FCM лёг → стоп не прошёл
+$session->update(['status' => 'completed', 'finished_at' => now()]);   // raw status string
+$user->update(['balance' => $user->balance + $refund]);                 // no transaction/lock: a crash between updates loses money
+FirebasePush::toToken($user->fcm_token)->send();                        // synchronous, inside the scenario: FCM down → stop fails
 ```
 
 ---
 
-## 5. Репозиторий-шлюз и `defer()`
+## 5. Gateway repository and `defer()`
 
 `app/Repositories/MobileCommandRepository.php`
 ```php
@@ -404,24 +414,26 @@ try {
 }
 ```
 
-Разбор:
-- Сервис вызывает `pushUserUpdated($user)` и не знает, что за этим стоят HTTP, Node-шлюз и WebSocket.
-- **Снимок данных до `defer`** (`resolve()` снаружи): в замыкание уходит готовый массив — без ленивых загрузок
-  после окончания запроса и без риска, что модель изменится до отправки.
-- `defer` — после ответа клиенту: бизнес-операция не ждёт сеть, отдельный воркер очередей не нужен (минимум инфраструктуры).
-- Ошибка шлюза → лог + `null`; операция не падает. `timeout(5)` ограничивает время, на которое занят воркер Swoole.
+Explanation:
+- The service calls `pushUserUpdated($user)` and does not know there is HTTP, a Node gateway and a WebSocket behind it.
+- **Data snapshot before `defer`** (`resolve()` outside): the closure captures a ready array and an int — no lazy loading after
+  the request, no risk the model changes before sending, and no model graph kept alive in memory.
+- `defer` runs after the response: the business operation does not wait for the network, no queue worker needed.
+- Gateway failure → log + `null`; the operation does not fail. `timeout(5)` bounds how long a Swoole worker is occupied.
+- The secret goes in a header, the URL comes from config (no SSRF).
+- **legacy → target:** `'UserUpdated'` → `MobileEvent::USER_UPDATED->value`; the HTTP client belongs in a repository, not an Action.
 
-### ❌ Как НЕ надо
+### ❌ Not like this
 ```php
-// в сервисе
-Http::post(config('custom.ws_server_url').'/broadcast', ['data' => $user]);   // синхронно, в сервисе, сырая модель
-dispatch(new SendMobileCommandJob($user));                                      // очередь ради одного HTTP-вызова — лишняя инфраструктура
-defer(fn () => $this->send(UserResource::make($user)->resolve()));              // сериализация внутри defer — ленивые загрузки/устаревшее состояние
+// in a service
+Http::post(config('custom.ws_server_url').'/broadcast', ['data' => $user]);   // external HTTP in a service, synchronous, raw model
+dispatch(new SendMobileCommandJob($user));                                      // a queue for one HTTP call — extra infrastructure
+defer(fn () => $this->send(UserResource::make($user)->resolve()));              // serializing inside defer — lazy loads, stale state, model kept in memory
 ```
 
 ---
 
-## 6. Оптимизированный запрос средствами MySQL
+## 6. An optimised query with MySQL alone
 
 `app/Repositories/PointRepository.php`
 ```php
@@ -430,7 +442,7 @@ public function getInRadius(float $latitude, float $longitude, float $radius): C
     $latOffset = $radius / 111320;
     $lngOffset = $radius / (111320 * max(abs(cos(deg2rad($latitude))), 0.0001));
 
-    $bbox = sprintf('POLYGON((%F %F, %F %F, %F %F, %F %F, %F %F))', /* углы квадрата */);
+    $bbox = sprintf('POLYGON((%F %F, %F %F, %F %F, %F %F, %F %F))', /* square corners */);
 
     return Point::select(Point::DEFAULT_SELECT_COLUMNS)
         ->withPrice()
@@ -444,27 +456,27 @@ public function getInRadius(float $latitude, float $longitude, float $radius): C
         ->get();
 }
 ```
-плюс в сервисе: `$radius = min(Point::MAX_RADIUS, $radius);`
+plus in the service: `$radius = min(Point::MAX_RADIUS, $radius);`
 
-Разбор:
-- **Двухступенчатый фильтр:** `MBRContains` по bounding box использует spatial-индекс и дёшево отсекает почти всё,
-  точный `ST_Distance_Sphere` считается только для оставшихся строк.
-- `max(..., 0.0001)` защищает от деления на ноль у полюсов.
-- **Жёсткие потолки:** `MAX_RADIUS` в сервисе и `limit(1000)` в запросе — один запрос не может выгрузить всю таблицу.
-- Все пользовательские значения — через биндинги `?`.
-- `withPrice()` — подзапрос в select вместо загрузки коннекторов ради одной цены.
-- PostGIS, Elastic и гео-сервисы не нужны (минимум инфраструктуры).
+Explanation:
+- **Two-step filter:** `MBRContains` on the bounding box uses the spatial index and cheaply discards almost everything;
+  the exact `ST_Distance_Sphere` runs only for the remaining rows. Cost depends on the area, not the table size.
+- `max(..., 0.0001)` prevents division by zero near the poles.
+- **Hard caps:** `MAX_RADIUS` in the service and `limit(1000)` in the query — one request cannot pull the whole table (DoS).
+- All user values go through `?` bindings; `%F` formats typed floats only.
+- `withPrice()` — a subquery in the select instead of loading connectors for one price.
+- No PostGIS, Elastic or geo services (minimum infrastructure).
 
-### ❌ Как НЕ надо
+### ❌ Not like this
 ```php
-return Point::all()->filter(fn ($p) => haversine($p, $lat, $lng) <= $radius);   // вся таблица в память, все колонки, N+1 на переводах
+return Point::all()->filter(fn ($p) => haversine($p, $lat, $lng) <= $radius);   // whole table in memory, all columns, N+1 on translations
 ```
 
 ---
 
-## 7. FormRequest: форма и служебный запрос
+## 7. FormRequest: a form vs a service request
 
-Служебный запрос — **с** остановкой на первой ошибке:
+Service request — **stop** on the first error:
 `app/Http/Requests/User/VerifyPhoneRequest.php`
 ```php
 protected $stopOnFirstFailure = true;
@@ -478,7 +490,7 @@ public function rules(): array
 }
 ```
 
-Многополевая форма — **без** `bail` и `$stopOnFirstFailure` (целевой вид; сейчас в проекте стоит `$stopOnFirstFailure = true`, это legacy):
+Multi-field form — **without** `bail` and `$stopOnFirstFailure` (the target; the project currently has `$stopOnFirstFailure = true`, which is legacy):
 ```php
 class UpdatePointRequest extends FormRequest
 {
@@ -497,18 +509,19 @@ class UpdatePointRequest extends FormRequest
     }
 }
 ```
-- Админ видит все неверные поля формы за один запрос.
-- Границы есть у каждого поля в обоих вариантах.
+- The admin sees every invalid field of the form in one request.
+- Both variants have bounds on every field, anchored regexes, and no privileged fields.
 
-### ❌ Как НЕ надо
+### ❌ Not like this
 ```php
-'company_id' => 'required|exists:companies,id',   // проверка существования вне транзакции; строковый синтаксис; нет границ
-'name' => 'required',                               // нет типа и max → в БД уйдёт что угодно
+'company_id' => 'required|exists:companies,id',   // a DB query in a FormRequest, outside the transaction; string syntax; no bounds
+'name' => 'required',                               // no type and no max → anything goes to the DB
+'role' => ['sometimes', 'string'],                  // a privileged field in a user-facing request → privilege escalation
 ```
 
 ---
 
-## 8. Фиксированные значения: enum вместо сырых строк
+## 8. Fixed values: an enum instead of raw strings
 
 `app/Services/OCPPService.php::handleStatusNotification` (legacy)
 ```php
@@ -524,7 +537,7 @@ if ($status === 'Charging') {
 }
 ```
 
-Как надо — набор значений и правило о нём живут в enum:
+Target — the set of values and the rules about it live in the enum:
 ```php
 // app/Enums/OCPPConnectorStatus.php
 enum OCPPConnectorStatus: string
@@ -563,24 +576,79 @@ if ($status->value === OCPPConnectorStatus::CHARGING->value) {
 }
 ```
 
-Разбор:
-- **Одна точка истины:** список «кабель вставлен» и «сессию пора остановить» объявлен один раз, в enum, рядом со значениями.
-- **Новое значение = новый `case`.** Миграция, ALTER и поиск строки по коду не нужны (enum в коде, колонка `string`).
-- **Опечатка ловится статически:** `OCPPConnectorStatus::CHARGNG` — ошибка Larastan, а `'Chargng'` молча вернёт `false`.
-- **Неизвестное значение от железа обрабатывается явно** (`tryFrom` → `null` → ранний return), а не уходит в «ни одна ветка не сработала».
-- Сравнение — по `->value` (правило автора).
+Explanation:
+- **One source of truth:** "cable plugged in" and "time to stop the session" are declared once, in the enum, next to the values.
+- **A new value = a new `case`.** No migration, no ALTER, no searching for strings (the enum lives in code, the column is `string`).
+- **Typos are caught statically:** `OCPPConnectorStatus::CHARGNG` is a Larastan error, while `'Chargng'` silently returns `false`.
+- **An unknown value from hardware is handled explicitly** (`tryFrom` → `null` → early return) instead of falling through every branch.
+- Comparison by `->value` (the author's rule).
 
-### ❌ Как НЕ надо
+### ❌ Not like this
 ```php
-if ($user->role == 'admin') { ... }                        // сырая строка, нестрогое сравнение, нет каста
-$table->enum('status', ['pending', 'charging']);           // набор значений в БД: новое значение = ALTER на проде
-'event' => 'UserUpdated'                                    // имя события строкой в трёх местах
+if ($user->role == 'admin') { ... }                        // raw string, loose comparison, no cast
+$table->enum('status', ['pending', 'charging']);           // the set of values in the DB: a new value = ALTER in production
+'event' => 'UserUpdated'                                    // an event name as a string in three places
+```
+
+---
+
+## 9. A query that stays in milliseconds on billions of rows
+
+`database/migrations/2026_04_09_000000_create_transactions_table.php` + `app/Repositories/TransactionRepository.php`
+```php
+// migration
+$table->foreignId('user_id')->constrained()->cascadeOnDelete();
+$table->index(['user_id', 'created_at']);
+
+// repository
+public function cursorPaginateByUserId(int $userId): CursorPaginator
+{
+    return Transaction::where('user_id', $userId)
+        ->select(Transaction::DEFAULT_SELECT_COLUMNS)
+        ->latest('id')
+        ->cursorPaginate(20);
+}
+```
+
+Explanation — this one is a near miss, and a good lesson:
+- **The filter is served, the sort is not.** The only index starting with `user_id` is `['user_id', 'created_at']`
+  (MySQL reuses it for the foreign key, so no separate `user_id` index is created). The query orders by `id`, so for one user
+  MySQL must read **all** of that user's rows and filesort them before returning 21. Fine for a typical user, linear for a user
+  (or an admin/system account) with millions of ledger rows.
+- **legacy → target:** make the index match `where` + `order by` exactly — either order by the indexed columns
+  (`->orderByDesc('created_at')->orderByDesc('id')` with the index `['user_id', 'created_at', 'id']`), or add `['user_id', 'id']`
+  and keep `latest('id')`. Then MySQL walks the index in order and stops after 21 rows.
+- **Keyset pagination:** the next page is `where (sort columns) < :cursor` on the same index — page 1 and page 100 000 cost the
+  same. No `OFFSET`, no `COUNT(*)`.
+- **Only the needed columns** (`DEFAULT_SELECT_COLUMNS`) — small rows, nothing extra to leak.
+- Check it with `EXPLAIN`: the target plan has `type: ref` on the composite index and **no** `Using filesort`.
+
+`app/Repositories/ChargingSessionRepository.php::chunkActiveSessions` + index `['status', 'last_progress_updated_at']`
+```php
+ChargingSession::with([...])
+    ->where('status', ChargingSessionStatus::CHARGING)
+    ->where(function ($query) {
+        $query->where('last_progress_updated_at', '<=', now()->subSeconds(ChargingSession::PROGRESS_INTERVAL_SECONDS))
+            ->orWhereNull('last_progress_updated_at');
+    })
+    ->chunkById($count, $callback);
+```
+- The composite index matches the filter (equality on `status`, range on `last_progress_updated_at`); finished sessions — the
+  overwhelming majority over time — are never touched.
+- `chunkById` walks by primary key in fixed-size batches: constant memory per batch, no `OFFSET`.
+
+### ❌ Not like this
+```php
+Transaction::where('user_id', $userId)->orderByDesc('created_at')->paginate(20);   // COUNT(*) + OFFSET: page N reads N×20 rows
+Transaction::whereRaw('DATE(created_at) = ?', [$day])->get();                       // function on an indexed column → full scan; unbounded get()
+Point::where('name', 'like', '%'.$q.'%')->get();                                    // leading wildcard → full scan; use FULLTEXT
+User::all()->each(fn ($u) => $u->update(['balance' => $u->transactions->sum('amount')]));   // everything in memory, N+1, denormalized write outside a lock
 ```
 
 ---
 
 <a id="example-test"></a>
-## 9. Feature-тест (эталон — в проекте тестов пока нет)
+## 10. A Feature test (reference — the project has no tests yet)
 
 `tests/Feature/ChargingSession/StoreChargingSessionTest.php`
 ```php
@@ -679,25 +747,25 @@ class StoreChargingSessionTest extends TestCase
 }
 ```
 
-Разбор:
-- **Деньги проверяются точной суммой** (`98.5` = 1 интервал = 60 кВт × 60 с / 3600 = 1 кВт·ч × 1.5), а не «баланс уменьшился».
-- **Каждое исключение сервиса — отдельный тест** со статусом из таблицы и текстом из `lang` через `__()`, а не строкой.
-- **Откат транзакции проверяется явно**: при отказе зарядника баланс и таблица сессий не меняются.
-- **Внешние системы — только через `Http::fake`**; `preventStrayRequests` в базовом `TestCase` не даст тесту уйти в сеть.
-  `Http::assertSent` работает, потому что `defer` выполняется на `terminate` HTTP-теста.
-- Связи создаются явно (`for($connector)`), без опоры на случайные строки из БД.
-- `number` и `ConnectorType` задаются явно: `ConnectorFactory` по умолчанию генерирует `number` вида `Connector-##`
-  (а `remoteStartTransaction` ждёт `int`) и подставляет `connector_type_id = 1`, если в БД нет типов.
-- (`Charger::factory()` потребует `HasFactory` + factory для `Charger` — в проекте её пока нет.)
+Explanation:
+- **Money is asserted as an exact amount** (`98.5` = 1 interval = 60 kW × 60 s / 3600 = 1 kWh × 1.5), not "the balance went down".
+- **Every service exception is its own test**, with the status from the table and the text from `lang` via `__()`, not a literal.
+- **The rollback is asserted explicitly**: when the charger rejects, neither the balance nor the sessions table changes.
+- **External systems only via `Http::fake`**; `preventStrayRequests` in the base `TestCase` keeps the test off the network.
+  `Http::assertSent` works because `defer` runs on `terminate` of an HTTP test.
+- Relations are created explicitly (`for($connector)`), not from random DB rows.
+- `number` and `ConnectorType` are set explicitly: `ConnectorFactory` defaults `number` to `Connector-##` (while
+  `remoteStartTransaction` expects an `int`) and falls back to `connector_type_id = 1` when no types exist.
+- (`Charger::factory()` needs `HasFactory` + a factory for `Charger` — the project does not have one yet.)
 
-### ❌ Как НЕ надо
+### ❌ Not like this
 ```php
 public function test_it_works(): void
 {
-    $this->seed();                                                      // зависимость от сидов и случайных данных
+    $this->seed();                                                      // depends on seeders and random data
     $user = User::first();
     $this->actingAs($user)->post('/api/charging-sessions', ['connector_id' => 1])->assertStatus(200);
-    $this->assertTrue(User::first()->balance < $user->balance);          // не проверяет сумму
+    $this->assertTrue(User::first()->balance < $user->balance);          // does not check the amount
 }
 ```
-Плюс мок каждого репозитория в «юнит-тесте» сервиса — проверяет моки, а не поведение.
+Plus mocking every repository in a service "unit test" — that tests the mocks, not the behaviour.

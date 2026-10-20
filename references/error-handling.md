@@ -1,8 +1,8 @@
-# Ошибки, логирование, API-ответы
+# Errors, logging, API responses
 
-## Доменные исключения
+## Domain exceptions
 
-### Класс
+### The class
 
 ```php
 // app/Exceptions/ConnectorBusyException.php
@@ -15,17 +15,17 @@ use RuntimeException;
 class ConnectorBusyException extends RuntimeException {}
 ```
 
-- Пустое тело, наследование от `RuntimeException`, без сообщения и кода.
-- Один класс — одна бизнес-ситуация. Общие `BadRequestException`/`TooManyRequestsException` — только там,
-  где детализация намеренно скрыта (неверный OTP: `UserService::verifyPhone` не сообщает,
-  что именно не так — код, срок или число попыток). [гипотеза: защита от перебора]
+- Empty body, extends `RuntimeException`, no message and no code.
+- One class = one business situation. Generic `BadRequestException`/`TooManyRequestsException` only where detail is hidden
+  on purpose (wrong OTP: `UserService::verifyPhone` does not say what exactly is wrong — the code, the expiry or the number
+  of attempts). [hypothesis: no oracle for brute force — see security.md]
 
-*Почему пустые:* текст зависит от языка клиента, а статус — от HTTP-контракта; ни то ни другое
-не является знанием сервиса. [гипотеза]
+*Why empty:* the text depends on the client's language and the status on the HTTP contract; neither is knowledge of the
+service. [hypothesis]
 
-### Где бросаются
+### Where they are thrown
 
-Только в **сервисе** или бизнес-**Action**. Репозиторий возвращает `null`/`false`, контроллер не проверяет ничего.
+Only in a **service** or a business **Action**. A repository returns `null`/`false`; a controller checks nothing.
 
 ```php
 // app/Services/PointService.php
@@ -37,7 +37,7 @@ public function delete(int $id): void
 }
 ```
 
-### Маппинг в HTTP — одно место
+### Mapping to HTTP — one place
 
 ```php
 // bootstrap/app.php
@@ -53,14 +53,14 @@ function mapExceptionToResponseData(Throwable $e): ?array
 ->withExceptions(function (Exceptions $exceptions): void {
     $exceptions->reportable(function (Throwable $e) {
         if (mapExceptionToResponseData($e) !== null) {
-            return false;            // ожидаемые бизнес-ошибки не засоряют лог
+            return false;            // expected business errors do not pollute the log
         }
     });
 
     $exceptions->render(function (Throwable $e) {
         $customResponse = mapExceptionToResponseData($e);
         if ($customResponse === null) {
-            return null;             // всё остальное — стандартная обработка Laravel
+            return null;             // everything else — default Laravel handling
         }
         [$status, $message] = $customResponse;
 
@@ -68,86 +68,86 @@ function mapExceptionToResponseData(Throwable $e): ?array
     });
 ```
 
-**Добавление новой ошибки — три обязательных шага:**
-1. Класс в `app/Exceptions/`.
-2. Строка в `match` в `bootstrap/app.php` (статус по таблице ниже).
-3. Ключ `snake_case` в **трёх** файлах: `lang/ru/all.php`, `lang/tg/all.php`, `lang/en/all.php`.
+**Adding a new error — three mandatory steps:**
+1. A class in `app/Exceptions/`.
+2. A line in the `match` in `bootstrap/app.php` (status from the table below).
+3. A `snake_case` key in **all three** files: `lang/ru/all.php`, `lang/tg/all.php`, `lang/en/all.php`.
 
-Формат строки в `match` фиксирован — `$e instanceof XxxException => [Response::HTTP_XXX, __('all.xxx')],` на одной строке:
-генератор Swagger читает статусы из `bootstrap/app.php` регуляркой (см. [architecture.md](architecture.md#swagger)).
+The `match` line has a fixed form — `$e instanceof XxxException => [Response::HTTP_XXX, __('all.xxx')],` on one line:
+the Swagger generator reads statuses from `bootstrap/app.php` with a regex (see [architecture.md](architecture.md#swagger)).
 
-Если пропустить шаг 2, клиент получит 500 и запись в лог; если пропустить шаг 3 — сырой ключ `all.xxx` в ответе.
+Skipping step 2 gives the client a 500 and a log entry; skipping step 3 returns the raw key `all.xxx`.
 
-> Язык сообщения определяется локалью приложения. Она выставляется в `AppServiceProvider::boot()` через
-> `app()->setLocale(accept_language())` — один раз при загрузке приложения. Под Octane провайдеры не перезагружаются на каждый
-> запрос, а `FlushLocaleState` сбрасывает локаль к `config('app.locale')`, поэтому язык ошибок, скорее всего,
-> не следует `Accept-Language` (переводы **данных** работают: `accept_language()` читает заголовок на каждом запросе).
-> Новый код на это не полагается; правка — в списке улучшений проекта.
+> The message language is the application locale. It is set in `AppServiceProvider::boot()` via
+> `app()->setLocale(accept_language())` — once, when the application boots. Under Octane providers are not re-booted per
+> request and `FlushLocaleState` resets the locale to `config('app.locale')`, so error messages most likely do not follow
+> `Accept-Language` (translations of **data** work: `accept_language()` reads the header on every request).
+> New code must not rely on it; the fix is in the list of project improvements (a middleware setting the locale per request).
 
-### Выбор HTTP-статуса (по факту проекта)
+### Choosing the HTTP status (as used in the project)
 
-| Ситуация | Статус | Примеры |
+| Situation | Status | Examples |
 |---|---|---|
-| Сущности нет / она чужая | `404 HTTP_NOT_FOUND` | `PointNotFoundException`, `ChargingSessionNotFoundException` (в т. ч. чужая сессия) |
-| Нарушено бизнес-правило / лимит / недопустимое состояние | `422 HTTP_UNPROCESSABLE_ENTITY` | `ChargerLimitReachedException`, `ChargerAlreadyExistsException`, `InvalidSessionStateException`, `ConnectorOfflineException`, `OCPPCommandFailedException` |
-| Конфликт с текущим состоянием ресурса | `409 HTTP_CONFLICT` | `ConnectorBusyException`, `ActiveSessionExistsException` |
-| Не хватает денег | `402 HTTP_PAYMENT_REQUIRED` | `InsufficientFundsException` |
-| Не выполнено физическое предусловие | `412 HTTP_PRECONDITION_FAILED` | `ConnectorNotConnectedException` (кабель не вставлен) |
-| Неизвестный зарядник на OCPP-эндпоинте | `401 HTTP_UNAUTHORIZED` | `ChargerRejectedException` |
-| Слишком часто | `429` | `TooManyRequestsException`, `ThrottleRequestsException` |
-| Неверный запрос без деталей | `400` | `BadRequestException` |
-| Нет роли | `403` | `RoleMiddleware` → `abort(Response::HTTP_FORBIDDEN)` |
+| The entity does not exist / belongs to someone else | `404 HTTP_NOT_FOUND` | `PointNotFoundException`, `ChargingSessionNotFoundException` (including another user's session) |
+| Business rule / limit / invalid state violated | `422 HTTP_UNPROCESSABLE_ENTITY` | `ChargerLimitReachedException`, `ChargerAlreadyExistsException`, `InvalidSessionStateException`, `ConnectorOfflineException`, `OCPPCommandFailedException` |
+| Conflict with the current state of the resource | `409 HTTP_CONFLICT` | `ConnectorBusyException`, `ActiveSessionExistsException` |
+| Not enough money | `402 HTTP_PAYMENT_REQUIRED` | `InsufficientFundsException` |
+| Physical precondition not met | `412 HTTP_PRECONDITION_FAILED` | `ConnectorNotConnectedException` (cable not plugged in) |
+| Unknown charger on an OCPP endpoint | `401 HTTP_UNAUTHORIZED` | `ChargerRejectedException` |
+| Too often | `429` | `TooManyRequestsException`, `ThrottleRequestsException` |
+| Bad request without details | `400` | `BadRequestException` |
+| Missing role | `403` | `RoleMiddleware` → `abort(Response::HTTP_FORBIDDEN)` |
 
-*Почему разные коды:* мобильный клиент ветвится по статусу (402 → экран пополнения, 412 → «вставьте кабель»,
-409 → «коннектор занят»), не разбирая текст. [гипотеза]
+*Why different codes:* the mobile client branches on the status (402 → top-up screen, 412 → "plug in the cable",
+409 → "connector is busy") without parsing the text. [hypothesis]
 
-`abort()` допустим **только в middleware** (`RoleMiddleware`, `OCPPMiddleware`) — это уровень HTTP.
+`abort()` is allowed **only in middleware** (`RoleMiddleware`, `OCPPMiddleware`) — that is the HTTP level.
 
 <a id="api-contract"></a>
-## Формат ответов
+## Response format
 
-| Случай | Тело | Как получить |
+| Case | Body | How |
 |---|---|---|
-| Бизнес-ошибка | `{"message": "Коннектор уже занят"}` | доменное исключение |
-| Ошибка валидации | стандартный Laravel 422: `{"message": "...", "errors": {"field": ["..."]}}` | FormRequest |
-| Throttle | `{"retry_after": 60}` + 429 | отдельный `render` для `ThrottleRequestsException` |
-| Объект | `{...}` **без** обёртки `data` | `XxxResource::make($model)` (в `AppServiceProvider` — `JsonResource::withoutWrapping()`) |
-| Список без пагинации | `[...]` | `XxxResource::collection($items)` |
-| Cursor-пагинация | `{"data": [...], "next_cursor": "..."\|null}` | `CursorPaginationResource::make($paginator, XxxResource::class)` |
-| Простая пагинация (поиск) | `{"data": [...], "next_page_url": "..."\|null}` | `LengthAwarePaginationResource::make($paginator, XxxResource::class)` |
-| Пусто (действие выполнено) | `[]` | `EmptyResource::make()` |
-| Токен | `{"token": "..."}` | `TokenResource::make($plainTextToken)` |
+| Business error | `{"message": "Connector is already busy"}` | a domain exception |
+| Validation error | standard Laravel 422: `{"message": "...", "errors": {"field": ["..."]}}` | FormRequest |
+| Throttle | `{"retry_after": 60}` + 429 | a separate `render` for `ThrottleRequestsException` |
+| Object | `{...}` **without** a `data` wrapper | `XxxResource::make($model)` (`JsonResource::withoutWrapping()` in `AppServiceProvider`) |
+| List without pagination | `[...]` | `XxxResource::collection($items)` (only for bounded lists) |
+| Cursor pagination | `{"data": [...], "next_cursor": "..."\|null}` | `CursorPaginationResource::make($paginator, XxxResource::class)` |
+| Simple pagination (search) | `{"data": [...], "next_page_url": "..."\|null}` | `LengthAwarePaginationResource::make($paginator, XxxResource::class)` |
+| Empty (action done) | `[]` | `EmptyResource::make()` |
+| Token | `{"token": "..."}` | `TokenResource::make($plainTextToken)` |
 
-Правила:
-- **Всегда Resource**, в том числе в админке и для пустых ответов. **[подтверждено]**
-  `response()->json($model)` и `response()->json()` в `PointController`, `CompanyController`, `ChargerController` и т. д. — legacy.
-- **Сначала select, потом Resource.** Resource только формирует контракт; лишние колонки отсекаются уже в запросе
-  (`DEFAULT_SELECT_COLUMNS`). **[подтверждено]**
-- В Resource — явные приведения: `(int) $this->watts`, `(float) $this->balance`, `(bool) $this->is_online`,
-  nullable — `$this->price !== null ? (float) $this->price : null`. *Почему:* decimal из MySQL приходит строкой,
-  а клиенту нужен стабильный тип.
-- Связи в Resource — через `whenLoaded('relation')`, никогда не загружать в Resource.
-- Даты отдаются как есть (Carbon → ISO-8601).
-- **Статус успеха** выставляет Laravel: Resource поверх модели с `wasRecentlyCreated = true` → `201`, иначе `200`.
-  Поэтому `create` в репозитории, который возвращает модель из `Model::create()`, даёт `201`
-  (`POST /charging-sessions`), а `create`, который перечитывает модель через `findById` (`PointRepository::create`), — `200`.
-  При переводе legacy-эндпоинтов с `response()->json()` на Resource проверить, что клиент не завязан на конкретный код 200/201.
-- Пагинация — cursor по 20 (`cursorPaginate(20)`). *Почему:* бесконечные ленты в мобильном приложении,
-  нет `COUNT(*)`, стабильность при вставках. `simplePaginate` — только когда нужна сортировка по вычисляемой
-  релевантности (`PointRepository::search`), где cursor невозможен.
-- Для админки, если форма ответа отличается от клиентской (например, нужен полный массив `translations`), —
-  отдельный Resource. Предлагаемое место: `app/Http/Resources/Admin/{Entity}Resource.php`.
-  **[предложение — в проекте пока нет, подтвердить]**
+Rules:
+- **Always a Resource**, including admin endpoints and empty responses. **[confirmed]**
+  `response()->json($model)` and `response()->json()` in `PointController`, `CompanyController`, `ChargerController`, etc. are legacy.
+- **Select first, then the Resource.** The Resource only shapes the contract; extra columns are cut off in the query
+  (`DEFAULT_SELECT_COLUMNS`). **[confirmed]**
+- Explicit casts in Resources: `(int) $this->watts`, `(float) $this->balance`, `(bool) $this->is_online`,
+  nullable — `$this->price !== null ? (float) $this->price : null`. *Why:* MySQL decimals arrive as strings, and the client
+  needs a stable type.
+- Relations in a Resource only via `whenLoaded('relation')`; a Resource never loads anything (no queries outside repositories).
+- Dates are returned as is (Carbon → ISO-8601).
+- **The success status is set by Laravel:** a Resource over a model with `wasRecentlyCreated = true` → `201`, otherwise `200`.
+  So a repository `create` returning the model from `Model::create()` gives `201` (`POST /charging-sessions`), while a
+  `create` that re-reads the model via `findById` (`PointRepository::create`) gives `200`.
+  When moving legacy endpoints from `response()->json()` to Resources, check that the client does not depend on 200 vs 201.
+- Pagination: cursor, 20 per page (`cursorPaginate(20)`). *Why:* infinite feeds in the mobile app, no `COUNT(*)`, stable under
+  inserts, constant cost at any table size. `simplePaginate` only when sorting by a computed relevance over a bounded candidate
+  set (`PointRepository::search`), where a cursor is impossible.
+- For the admin panel, if the response shape differs from the client one (e.g. the full `translations` array is needed) —
+  a separate Resource. Proposed location: `app/Http/Resources/Admin/{Entity}Resource.php`. **[proposal — to confirm]**
+- Error responses never contain internals (stack traces, SQL, class names): `APP_DEBUG=false` in production.
 
-## Логирование
+## Logging
 
-### Каналы
+### Channels
 
-- `charging` — `daily`, 14 дней (`config/logging.php`). Всё, что касается денег и сессий зарядки.
-- Канал по умолчанию — входящие OCPP-сообщения (`Log::info("OCPP [{$remoteCode}] {$action}", $payload)`),
-  ошибки внешних шлюзов (`SendWebsocketRequestAction`).
+- `charging` — `daily`, 14 days (`config/logging.php`). Everything about money and charging sessions.
+- Default channel — incoming OCPP messages (`Log::info("OCPP [{$remoteCode}] {$action}", $payload)`), external gateway
+  failures (`SendWebsocketRequestAction`).
 
-### Что и как
+### What and how
 
 ```php
 // app/Services/ChargingSessionService.php::create
@@ -161,33 +161,33 @@ function mapExceptionToResponseData(Throwable $e): ?array
 }
 ```
 
-- **Log-and-rethrow** на границе денежной операции: снаружи `transaction()`, с контекстом идентификаторов и классом
-  исключения, после чего исключение пробрасывается (обработчик превратит его в ответ). [гипотеза: разбор
-  денежных инцидентов по `user_id`/`session_id` без включения отчётов для ожидаемых бизнес-ошибок]
-- Сообщения — на английском, в формате `"Failed to <action>: ".$e->getMessage()`; ID — в контексте или в тексте.
-- Уровни:
-  - `error` — операция не выполнена;
-  - `warning` — сработал fallback (`Bulk progress update failed, falling back to individual processing`) или
-    внешняя сторона отклонила команду (`[OCPP Command] {$action} rejected`);
-  - `info` — значимое бизнес-событие (`Session {id} stopped due to charger offline timeout`).
-- Префикс подсистемы в квадратных скобках: `[OCPP Command]`, `[Mobile Command]`.
-- **Не логировать** персональные данные сверх ID (телефон, OTP-код, токены).
-- Отладочные `Log::info('DEFER EXECUTED…')` в коммит не попадают (legacy в `MobileCommandRepository::pushBulkActiveSessions`).
+- **Log-and-rethrow** at the boundary of a money operation: outside `transaction()`, with id context and the exception class,
+  then the exception is rethrown (the handler turns it into a response). [hypothesis: money incidents can be traced by
+  `user_id`/`session_id` without enabling reports for expected business errors]
+- Messages in English, `"Failed to <action>: ".$e->getMessage()`; ids in the context or in the text.
+- Levels:
+  - `error` — the operation was not performed;
+  - `warning` — a fallback kicked in (`Bulk progress update failed, falling back to individual processing`) or the other side
+    rejected a command (`[OCPP Command] {$action} rejected`);
+  - `info` — a significant business event (`Session {id} stopped due to charger offline timeout`).
+- Subsystem prefix in square brackets: `[OCPP Command]`, `[Mobile Command]`.
+- **Never log** personal data or credentials: phone numbers, OTP codes, tokens, FCM tokens, secrets, full request bodies.
+- Debug lines like `Log::info('DEFER EXECUTED…')` never get committed (legacy in `MobileCommandRepository::pushBulkActiveSessions`).
+- Log context stays small (ids, short arrays) — large payloads in loops waste memory and disk.
 
-### Где глотать исключения
+### Where swallowing exceptions is allowed
 
-Глотать можно **только явно перечисленные ожидаемые** исключения и только в фоновых потоках, где
-состояние могло измениться конкурентно:
+Only **explicitly listed expected** exceptions, and only in background flows where the state may have changed concurrently:
 
 ```php
-// ChargingSessionService::autoUpdateProgress — зависшие pending-сессии
+// ChargingSessionService::autoUpdateProgress — stale pending sessions
 try {
     $this->stopChargingSessionAction->execute($session->id, $session->user, false);
 } catch (InvalidSessionStateException|ChargingSessionNotFoundException $e) {
 }
 ```
 
-В batch-цикле — `catch (Throwable $e)` с логированием, чтобы одна сломанная сессия не останавливала пачку.
+In a batch loop — `catch (Throwable $e)` with logging, so one broken session does not stop the batch.
 
-Ошибка внешнего шлюза (WS, SMS, FCM) не должна ронять бизнес-операцию: результат — `null`/`false` + лог.
-(legacy: `catch (Exception) {}` без лога в `NotificationRepository::sendSms` — нужно логировать.)
+An external gateway failure (WS, SMS, FCM) must not break the business operation: the result is `null`/`false` + a log line.
+(legacy: `catch (Exception) {}` without a log in `NotificationRepository::sendSms` — must log.)

@@ -1,30 +1,30 @@
-# Тесты
+# Tests
 
-> **Состояние проекта:** тестов пока нет: нет ни `tests/`, ни `phpunit.xml`, `phpunit/phpunit` не установлен.
-> Есть factories и seeders, но они рассчитаны на наполнение dev-БД.
-> Автор попросил добавить тесты и выбрать лучший подход. **[подтверждено]**
-> Ниже — выбранный подход; первичная настройка выполняется только по явной просьбе автора.
+> **Project state:** there are no tests yet: no `tests/`, no `phpunit.xml`, `phpunit/phpunit` is not installed.
+> Factories and seeders exist, but they are designed to fill a dev database.
+> The author asked to add tests and choose the best approach. **[confirmed]**
+> Below is the chosen approach; the initial setup is done only when the author explicitly asks for it.
 
-## Выбор: PHPUnit + Feature-first + MySQL
+## The choice: PHPUnit + Feature-first + MySQL
 
-| Решение | Почему | От чего отказываемся |
+| Decision | Why | What we give up |
 |---|---|---|
-| **PHPUnit** (не Pest) | Нативен для Laravel (`php artisan test`, скрипт `composer test` уже есть). Тесты — такие же классы, как остальной код: типы, `readonly`-окружение; Larastan анализирует их без плагинов | Лаконичность `expect()`-синтаксиса Pest |
-| **Feature-тесты на эндпоинты** — основной вид | Вся ценность — в связке FormRequest → Service → Repository → Resource → маппинг исключений. Изолированный юнит-тест сервиса потребовал бы мокать каждый репозиторий (интерфейсов нет) и проверял бы моки, а не поведение | Скорость отдельных юнит-тестов |
-| **Unit-тесты** — только на чистую доменную математику моделей | `ChargingSession::calculateCost`, `calculateIntervalWatts`, `getEstimatedWattsDelivered`, `normalizeSoc`: формулы денег без БД | — |
-| **MySQL test-БД**, не SQLite | Миграции используют `geometry … srid 4326`, `spatialIndex`, `FULLTEXT … WITH PARSER ngram`, запросы — `ST_Distance_Sphere`, `MBRContains`, `MATCH … AGAINST`. В SQLite это не работает | Скорость in-memory SQLite |
-| `Http::fake()` + `Http::preventStrayRequests()` | Все внешние системы (WS-шлюз, FCM, SMS) ходят через `Http`; ни один тест не должен уйти в сеть | — |
+| **PHPUnit** (not Pest) | Native to Laravel (`php artisan test`, the `composer test` script already exists). Tests are classes like the rest of the code: types, `readonly` surroundings; Larastan analyses them without plugins | The terse `expect()` syntax of Pest |
+| **Feature tests for endpoints** — the main kind | All the value is in the chain FormRequest → Service → Repository → Resource → exception mapping. An isolated service unit test would need every repository mocked (there are no interfaces) and would test mocks, not behaviour | Speed of isolated unit tests |
+| **Unit tests** only for pure domain math of models and enum rules | `ChargingSession::calculateCost`, `calculateIntervalWatts`, `getEstimatedWattsDelivered`, `normalizeSoc`, enum methods like `isPluggedIn()`: money formulas without a DB | — |
+| **MySQL test DB**, not SQLite | Migrations use `geometry … srid 4326`, `spatialIndex`, `FULLTEXT … WITH PARSER ngram`; queries use `ST_Distance_Sphere`, `MBRContains`, `MATCH … AGAINST`. SQLite cannot run them | In-memory SQLite speed |
+| `Http::fake()` + `Http::preventStrayRequests()` | All external systems (WS gateway, FCM, SMS) go through `Http`; no test may reach the network | — |
 
-## Первичная настройка (выполнять только по просьбе автора)
+## Initial setup (only when the author asks)
 
-1. `composer require --dev phpunit/phpunit` (Laravel 13 поддерживает `^11.5.50 || ^12.5.8 || ^13.0.3`).
-2. В `composer.json` → `autoload-dev.psr-4`: `"Tests\\": "tests/"`, затем `composer dump-autoload`.
-3. Создать БД `electro_test` (тот же MySQL, отдельная схема).
-4. `phpunit.xml` из [templates/phpunit.xml.stub](../templates/phpunit.xml.stub).
-5. `tests/TestCase.php` из [templates/test-case.stub](../templates/test-case.stub).
-6. Запуск: `php artisan test` (или `composer test`).
+1. `composer require --dev phpunit/phpunit` (Laravel 13 supports `^11.5.50 || ^12.5.8 || ^13.0.3`).
+2. In `composer.json` → `autoload-dev.psr-4`: `"Tests\\": "tests/"`, then `composer dump-autoload`.
+3. Create the `electro_test` database (same MySQL, separate schema).
+4. `phpunit.xml` from [templates/phpunit.xml.stub](../templates/phpunit.xml.stub).
+5. `tests/TestCase.php` from [templates/test-case.stub](../templates/test-case.stub).
+6. Run: `php artisan test` (or `composer test`).
 
-## Структура и именование
+## Structure and naming
 
 ```
 tests/
@@ -33,40 +33,49 @@ tests/
 │   ├── ChargingSession/
 │   │   ├── StoreChargingSessionTest.php     # POST /api/charging-sessions
 │   │   ├── StopChargingSessionTest.php      # POST /api/charging-sessions/{id}/stop
-│   │   └── AutoUpdateProgressTest.php       # cron-сценарий (вызов сервиса, без HTTP)
+│   │   └── AutoUpdateProgressTest.php       # cron scenario (service call, no HTTP)
 │   ├── Charger/
 │   │   ├── StoreChargerTest.php
 │   │   └── ...
 │   └── OCPP/
 │       └── HandleMessageTest.php
 └── Unit/
-    └── Models/
-        └── ChargingSessionTest.php
+    ├── Models/
+    │   └── ChargingSessionTest.php
+    └── Enums/
+        └── OCPPConnectorStatusTest.php
 ```
 
-- Папки Feature повторяют `app/Http/Requests/{Entity}`; файл — `{Verb}{Entity}Test` (как FormRequest, только с суффиксом `Test`).
-- Метод — `test_{что}_{результат}_when_{условие}` в snake_case:
+- Feature folders mirror `app/Http/Requests/{Entity}`; the file is `{Verb}{Entity}Test` (like the FormRequest, with a `Test` suffix).
+- Method name: `test_{what}_{result}_when_{condition}` in snake_case:
   `test_store_returns_409_when_connector_is_busy`, `test_stop_refunds_interval_cost_when_session_is_pending`.
-- Один тест — одно поведение. Структура Arrange / Act / Assert отделяется пустыми строками, без комментариев.
+- One test = one behaviour. Arrange / Act / Assert are separated by blank lines, no comments.
 
-## Что тестировать (по приоритету)
+## What to test (by priority)
 
-1. **Денежные потоки** — создание и остановка сессии, `top-up`, `autoUpdateProgress`: баланс после операции,
-   запись в `transactions`, статус сессии. Проверять **точные суммы** (`assertSame(98.5, $user->fresh()->balance)`).
-2. **Каждое доменное исключение сервиса** — статус + `message` из `lang` (см. таблицу статусов в
-   [error-handling.md](error-handling.md)). Новое исключение без теста = незакрытый пункт чек-листа.
-3. **Доступ:** без токена → 401, не-админ на admin-маршруте → 403, чужая сущность → 404 (ownership).
-4. **Контракт ответа:** `assertExactJson`/`assertJsonStructure` + типы ключевых полей (Resource — это контракт мобильного приложения).
-5. **Валидация:** границы (`min`/`max`), обязательность; для форм — что возвращаются **все** ошибки сразу,
-   для остальных — ровно одна (`stopOnFirstFailure`).
-6. **OCPP-хендлеры:** `StartTransaction`/`StopTransaction`/`StatusNotification` переводят сессию в правильный статус.
-7. **Отправленные побочные эффекты:** `Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/broadcast') && $r['event'] === 'ActiveSessions')`.
+1. **Money flows**: starting and stopping a session, `top-up`, `autoUpdateProgress` — balance after the operation, the
+   `transactions` record, the session status. Assert **exact amounts** (`assertSame(98.5, $user->fresh()->balance)`).
+   Also assert that the denormalized balance agrees with the ledger after the flow.
+2. **Every domain exception of the service**: status + `message` from `lang` (status table in
+   [error-handling.md](error-handling.md)). A new exception without a test is an open checklist item.
+3. **Security:** no token → 401; non-admin on an admin route → 403; another user's entity → 404 (ownership);
+   privileged fields in a user request do not change anything (`PATCH /user` with `role`/`balance`);
+   shared-secret endpoints reject a missing/wrong secret and an empty configured secret.
+4. **Response contract:** `assertExactJson`/`assertJsonStructure` + types of key fields (the Resource is the mobile app's contract);
+   sensitive fields (`remote_code`, timestamps) are absent.
+5. **Validation:** bounds (`min`/`max`), required fields; for forms — **all** errors are returned at once,
+   for the rest — exactly one (`stopOnFirstFailure`).
+6. **OCPP handlers:** `StartTransaction`/`StopTransaction`/`StatusNotification` move the session to the right status;
+   unknown statuses/actions are handled explicitly.
+7. **Side effects sent:** `Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/broadcast') && $r['event'] === 'ActiveSessions')`.
+8. **No N+1 on list endpoints:** `preventLazyLoading` already throws in tests; for extra safety count queries with `DB::listen`.
 
-**Не тестировать:** поведение фреймворка (что `required` работает), тривиальные прокси-методы, Resource отдельно
-от эндпоинта, реальные внешние API. Гонки `lockForUpdate` PHPUnit не воспроизводит — их корректность обеспечивает
-ревью по правилу «проверил → записал внутри транзакции с блокировкой».
+**Do not test:** framework behaviour (that `required` works), trivial proxy methods, Resources separately from the endpoint,
+real external APIs. PHPUnit cannot reproduce `lockForUpdate` races — their correctness is ensured by review against the rule
+"check → write inside a transaction with a lock". Query plans are verified with `EXPLAIN` on realistic data, not in tests
+([performance.md](performance.md#queries)).
 
-## Окружение и фейки
+## Environment and fakes
 
 ```php
 abstract class TestCase extends BaseTestCase
@@ -87,33 +96,33 @@ abstract class TestCase extends BaseTestCase
 }
 ```
 
-- **`defer()`**: в HTTP-тестах отложенные колбэки выполняются на `terminate` (тестовый клиент Laravel его вызывает),
-  поэтому `Http::assertSent` работает после `postJson`. При прямом вызове сервиса без HTTP
-  (`autoUpdateProgress`) — вызвать `$this->withoutDefer()`, чтобы колбэки выполнялись сразу.
-- **FCM:** в factories у пользователя нет `fcm_token` → push не отправляется. Если нужен тест push —
-  `$this->mock(FirebasePushService::class)` (фасад `FirebasePush` резолвит этот класс).
+- **`defer()`**: in HTTP tests deferred callbacks run on `terminate` (Laravel's test client calls it), so `Http::assertSent`
+  works after `postJson`. When calling a service directly without HTTP (`autoUpdateProgress`), call `$this->withoutDefer()`
+  so callbacks run immediately.
+- **FCM:** users from factories have no `fcm_token` → no push. To test a push — `$this->mock(FirebasePushService::class)`
+  (the `FirebasePush` facade resolves this class).
 - **SMS:** `Http::fake([config('custom.sms.server').'*' => Http::response()])` + `Http::assertSent(...)`.
-- **Время:** `$this->travelTo(now()->startOfMinute())`, `$this->travel(2)->minutes()` — для интервалов зарядки
-  и проверки «прошла минута» (`PROGRESS_INTERVAL_SECONDS`), TTL OTP.
-- **Аутентификация:** `Sanctum::actingAs($user)`; админ — `User::factory()->create(['role' => Role::ADMIN->value])`.
-- **Локаль:** сообщение ошибки сравнивать через `__('all.connector_busy')`, а не строкой. Заголовок `Accept-Language` в тесте
-  **не меняет** язык сообщений ошибок: `app()->setLocale(accept_language())` вызывается один раз в `AppServiceProvider::boot()`,
-  до тестового запроса (а переводы данных через `accept_language()` читают заголовок на каждом запросе и работают).
-  Тест на язык ошибок станет возможен, когда локаль будет выставляться per-request (см. итоговый отчёт: улучшения проекта).
-- **FULLTEXT-поиск** (`points/search`): InnoDB обновляет FULLTEXT-индекс только при коммите, а `RefreshDatabase`
-  держит тест в транзакции → для тестов поиска использовать `DatabaseTruncation` вместо `RefreshDatabase`.
-- **Factories:** текущие factories берут случайные существующие строки (`User::inRandomOrder()->first()`) — это удобно
-  для сидов, но недетерминированно в тестах. В тестах всегда передавать связи явно:
-  `ChargingSession::factory()->for($user)->for($connector)->create([...])` или добавить factory-states.
-  Учитывать fallback'и в текущих factories: `ConnectorFactory` подставляет `charger_id`/`connector_type_id = 1`, если строк нет,
-  и генерирует `number` строкой `Connector-##` — в тестах задавать эти поля явно.
+- **Time:** `$this->travelTo(now()->startOfMinute())`, `$this->travel(2)->minutes()` — for charging intervals,
+  "a minute has passed" (`PROGRESS_INTERVAL_SECONDS`) and the OTP TTL.
+- **Authentication:** `Sanctum::actingAs($user)`; admin — `User::factory()->create(['role' => Role::ADMIN->value])`.
+- **Locale:** compare error messages with `__('all.connector_busy')`, never a literal string. The `Accept-Language` header in a
+  test **does not change** the language of error messages: `app()->setLocale(accept_language())` is called once in
+  `AppServiceProvider::boot()`, before the test request (translations of data through `accept_language()` read the header per
+  request and do work). Testing the error language becomes possible once the locale is set per request (see project improvements).
+- **FULLTEXT search** (`points/search`): InnoDB updates the FULLTEXT index only on commit, while `RefreshDatabase` keeps the test
+  inside a transaction → use `DatabaseTruncation` instead of `RefreshDatabase` for search tests.
+- **Factories:** current factories pick random existing rows (`User::inRandomOrder()->first()`) — handy for seeding, but
+  non-deterministic in tests. In tests always pass relations explicitly:
+  `ChargingSession::factory()->for($user)->for($connector)->create([...])`, or add factory states.
+  Mind the fallbacks in current factories: `ConnectorFactory` uses `charger_id`/`connector_type_id = 1` when no rows exist and
+  generates `number` as a string `Connector-##` — set these fields explicitly in tests.
 
-## Эталон
+## Reference
 
-Полный пример с разбором — [examples.md → «Feature-тест»](examples.md#example-test);
-шаблоны — [templates/feature-test.stub](../templates/feature-test.stub), [templates/unit-test.stub](../templates/unit-test.stub).
+Full example with explanations — [examples.md → "Feature test"](examples.md#example-test);
+templates — [templates/feature-test.stub](../templates/feature-test.stub), [templates/unit-test.stub](../templates/unit-test.stub).
 
-## Перед коммитом
+## Before committing
 
 ```bash
 php vendor/bin/pint
@@ -121,4 +130,4 @@ php vendor/bin/phpstan analyse app config database routes bootstrap lang --level
 php artisan test
 ```
 
-(Если тесты добавлены, имеет смысл включить `tests` в список путей phpstan.)
+(Once tests exist, it makes sense to add `tests` to the phpstan paths.)

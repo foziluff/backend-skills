@@ -2,20 +2,21 @@
 
 namespace App\Enums;
 
-// app/Enums/{{EntityName}}{{Aspect}}.php  (например, TariffStatus, TariffType)
+// app/Enums/{{EntityName}}{{Aspect}}.php  (e.g. TariffStatus, TariffType)
 //
-// Фиксированный набор значений живёт ЗДЕСЬ, а не в БД:
-//   • миграция: $table->string('{{aspect}}')            — НЕ $table->enum(...)
-//   • модель:   '{{aspect}}' => {{EntityName}}{{Aspect}}::class   в casts()
-//   • запрос:   new Enum({{EntityName}}{{Aspect}}::class)
-//   • код:      {{EntityName}}{{Aspect}}::ACTIVE, сравнение по ->value — никаких сырых строк 'active'
-// Новое значение = новый case, без миграции.
+// The fixed set of values lives HERE, not in the DB:
+//   • migration:  $table->string('{{aspect}}')                    — NOT $table->enum(...)
+//   • model:      '{{aspect}}' => {{EntityName}}{{Aspect}}::class    in casts()
+//   • request:    new Enum({{EntityName}}{{Aspect}}::class)
+//   • code:       {{EntityName}}{{Aspect}}::ACTIVE, compared by ->value — never a raw string 'active'
+//   • untrusted:  {{EntityName}}{{Aspect}}::tryFrom($raw) → null → explicit branch (never ::from() on input)
+// A new value = a new case, no migration.
 enum {{EntityName}}{{Aspect}}: string
 {
     case ACTIVE = 'active';
     case ARCHIVED = 'archived';
 
-    // РЕШЕНИЕ: группы значений и правила о значениях — методы enum'а, а не массивы строк в сервисах
+    // DECISION: groups of values and rules about values are enum methods, not string arrays in services
     /**
      * @return array<int, self>
      */

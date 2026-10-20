@@ -6,8 +6,8 @@ use App\Models\{{EntityName}};
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
-// Unit — только чистая доменная математика модели (без БД, без контейнера Laravel).
-// Пример из проекта: ChargingSession::calculateCost, calculateIntervalWatts, normalizeSoc.
+// Unit — only pure domain math of a model or enum rules (no DB, no Laravel container).
+// Project examples: ChargingSession::calculateCost, calculateIntervalWatts, normalizeSoc.
 class {{EntityName}}Test extends TestCase
 {
     /**

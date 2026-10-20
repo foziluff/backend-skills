@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- phpunit.xml в корне проекта -->
+<!-- phpunit.xml in the project root -->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
          bootstrap="vendor/autoload.php"
@@ -26,10 +26,10 @@
         <env name="SESSION_DRIVER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="MAIL_MAILER" value="array"/>
-        <!-- MySQL обязателен: spatial + FULLTEXT ngram не работают в SQLite -->
+        <!-- MySQL is required: spatial + FULLTEXT ngram do not work in SQLite -->
         <env name="DB_CONNECTION" value="mysql"/>
         <env name="DB_DATABASE" value="electro_test"/>
-        <!-- фейковые адреса внешних систем, перехватываются Http::fake() -->
+        <!-- fake addresses of external systems, intercepted by Http::fake(); test-only values -->
         <env name="WS_SERVER_URL" value="http://ws.test"/>
         <env name="WS_SECRET" value="test-secret"/>
         <env name="SMS_SERVER" value="http://sms.test"/>
