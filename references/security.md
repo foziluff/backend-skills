@@ -78,7 +78,7 @@ Rules for new code:
 ## 4. Input validation
 
 - Every field has a type **and** bounds: strings `min:1|max:255`, ids `min:1|max:999999999999999`, money
-  `min:0.01|max:99999999.99`, arrays `min:1|max:1000`, coordinates `between`.
+  `'integer', 'min:0', 'max:'.Money::MAX` (minor units), arrays `min:1|max:1000`, coordinates `between`.
   Unbounded input is a DoS and overflow vector.
 - Regexes are anchored: `regex:/^\d{9}$/`.
 - Fixed sets — `new Enum(X::class)`; never trust a free string to match a case.
@@ -151,7 +151,10 @@ Rules for new code:
 - State checks make operations idempotent: stopping an already stopped session throws `InvalidSessionStateException`
   instead of refunding twice.
 - Every movement of money is recorded in `transactions` (`WITHDRAWAL` / `REPLENISHMENT`).
-- Amounts are rounded with `round(..., 2)` after each step; stored as `decimal(36, 2)`.
+- Amounts are integers in minor units (signed `bigInteger`, `CHECK >= 0` on amounts that never go negative): sums and
+  differences are exact, a share is rounded once in `Money::share` (half to even). A bank amount is parsed strictly by
+  `Money::fromDecimal`: anything that is not an exact amount is an "amount mismatch" (422), never rounded into a match,
+  and the payment is not credited. ([data-layer.md](data-layer.md#money))
 - External confirmation before charging starts: if the charger rejects `RemoteStartTransaction`, the whole transaction
   (including the prepaid interval) rolls back.
 

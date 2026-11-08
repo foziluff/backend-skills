@@ -20,7 +20,7 @@ readonly class {{Verb}}{{EntityName}}Action
         try {
             return transaction(function () use ($id) {
                 // 1. fetch with lockForUpdate and check the state → domain exception (idempotency)
-                // 2. calculations (formulas are static model methods), round(..., 2) for money
+                // 2. calculations (formulas are static model methods); money in integer minor units (Money::share for a share)
                 // 3. writes through repositories; a denormalized value changes here, together with its source of truth
                 // 4. side effects through gateway repositories (inside defer, with snapshot data)
             });

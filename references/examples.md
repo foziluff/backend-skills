@@ -317,7 +317,7 @@ public function execute(int $id, User $authUser, bool $isHardwareInitiated = fal
             if ($isPending) {
                 $refundAmount = $intervalCost;
                 $finalWatts = 0;
-                $finalAmount = 0.00;
+                $finalAmount = 0;
                 $status = ChargingSessionStatus::CANCELLED;
             } else {
                 $timeBasedFinalWatts = $session->getEstimatedWattsDelivered($now);
@@ -329,10 +329,10 @@ public function execute(int $id, User $authUser, bool $isHardwareInitiated = fal
                     $finalWatts = $timeBasedFinalWatts;
                 }
 
-                $targetTotalCost = ChargingSession::calculateCost($finalWatts, $session->price_per_kw);
-                $exactCost = round($targetTotalCost - (float) $session->withdrawn_amount, 2);
+                $targetTotalCost = ChargingSession::calculateCost($finalWatts, $session->price_per_kw);   // Money::share inside: the only rounding
+                $exactCost = $targetTotalCost - $session->withdrawn_amount;
 
-                $refundAmount = round($intervalCost - $exactCost, 2);
+                $refundAmount = $intervalCost - $exactCost;
                 $finalAmount = $targetTotalCost;
                 $status = ChargingSessionStatus::COMPLETED;
             }
@@ -360,7 +360,8 @@ Explanation:
   twice; the second call gets `InvalidSessionStateException` (idempotency through a state check).
 - **Two sources of truth for energy:** the charger meter (`meterStop - meter_start`) if present and plausible, otherwise the
   time-based estimate. The fallback is decided in one place. Hardware data is cast to `int` (untrusted input).
-- **Every intermediate money value is rounded** with `round(..., 2)`; the balance and the ledger change in one transaction.
+- **Money is integer minor units**: the cost is rounded once inside `calculateCost` (`Money::share`), the differences are
+  exact integers with no rounding; the balance and the ledger change in one transaction.
 - **Pending → CANCELLED with a full refund** — a separate branch, no withdrawal record.
 - **legacy → target:** the method must be named `handle`; compare statuses by `->value`.
 
@@ -671,8 +672,8 @@ class StoreChargingSessionTest extends TestCase
 {
     public function test_store_creates_pending_session_and_deducts_interval_cost(): void
     {
-        $user = User::factory()->create(['balance' => 100]);
-        $connector = $this->makeReadyConnector(watts: 60000, pricePerKw: 1.5);
+        $user = User::factory()->create(['balance' => 10_000]);   // 100.00
+        $connector = $this->makeReadyConnector(watts: 60000, pricePerKw: 150);
         Sanctum::actingAs($user);
 
         $response = $this->postJson('/api/charging-sessions', ['connector_id' => $connector->id]);
@@ -680,13 +681,13 @@ class StoreChargingSessionTest extends TestCase
         $response->assertCreated()
             ->assertJsonPath('status', ChargingSessionStatus::PENDING->value)
             ->assertJsonPath('connector_id', $connector->id);
-        $this->assertSame(98.5, $user->fresh()->balance);
+        $this->assertSame(9_850, $user->fresh()->balance);
         Http::assertSent(fn (Request $request) => str_contains($request->url(), '/command/') && $request['action'] === 'RemoteStartTransaction');
     }
 
     public function test_store_returns_409_when_connector_is_busy(): void
     {
-        $user = User::factory()->create(['balance' => 100]);
+        $user = User::factory()->create(['balance' => 10_000]);
         $connector = $this->makeReadyConnector();
         ChargingSession::factory()->for($connector)->for(User::factory())->create(['status' => ChargingSessionStatus::CHARGING]);
         Sanctum::actingAs($user);
@@ -695,7 +696,7 @@ class StoreChargingSessionTest extends TestCase
 
         $response->assertConflict()
             ->assertExactJson(['message' => __('all.connector_busy')]);
-        $this->assertSame(100.0, $user->fresh()->balance);
+        $this->assertSame(10_000, $user->fresh()->balance);
     }
 
     public function test_store_returns_402_when_balance_is_insufficient(): void
@@ -713,14 +714,14 @@ class StoreChargingSessionTest extends TestCase
     public function test_store_rolls_back_when_charger_rejects_command(): void
     {
         Http::fake(['*/command/*' => Http::response(['status' => 'Rejected'])]);
-        $user = User::factory()->create(['balance' => 100]);
+        $user = User::factory()->create(['balance' => 10_000]);
         $connector = $this->makeReadyConnector();
         Sanctum::actingAs($user);
 
         $this->postJson('/api/charging-sessions', ['connector_id' => $connector->id])
             ->assertUnprocessable();
 
-        $this->assertSame(100.0, $user->fresh()->balance);
+        $this->assertSame(10_000, $user->fresh()->balance);
         $this->assertDatabaseCount('charging_sessions', 0);
     }
 
@@ -730,7 +731,7 @@ class StoreChargingSessionTest extends TestCase
             ->assertUnauthorized();
     }
 
-    private function makeReadyConnector(int $watts = 60000, float $pricePerKw = 1.5): Connector
+    private function makeReadyConnector(int $watts = 60000, int $pricePerKw = 150): Connector
     {
         $charger = Charger::factory()->create(['last_heartbeat_at' => now()]);
 
@@ -748,7 +749,8 @@ class StoreChargingSessionTest extends TestCase
 ```
 
 Explanation:
-- **Money is asserted as an exact amount** (`98.5` = 1 interval = 60 kW × 60 s / 3600 = 1 kWh × 1.5), not "the balance went down".
+- **Money is asserted as an exact amount in minor units** (`9_850` = `10_000` − 1 interval: 60 kW × 60 s / 3600 = 1 kWh × `150`),
+  not "the balance went down".
 - **Every service exception is its own test**, with the status from the table and the text from `lang` via `__()`, not a literal.
 - **The rollback is asserted explicitly**: when the charger rejects, neither the balance nor the sessions table changes.
 - **External systems only via `Http::fake`**; `preventStrayRequests` in the base `TestCase` keeps the test off the network.

@@ -11,19 +11,21 @@ use PHPUnit\Framework\TestCase;
 class {{EntityName}}Test extends TestCase
 {
     /**
-     * @return array<string, array{int, float, float}>
+     * @return array<string, array{int, int, int}>
      */
     public static function costProvider(): array
     {
         return [
-            'one kWh' => [1000, 1.5, 1.5],
-            'rounds to cents' => [333, 1.5, 0.5],
-            'zero' => [0, 1.5, 0.0],
+            'one kWh' => [1000, 150, 150],
+            'rounds once to the minor unit' => [333, 150, 50],
+            'exact half on an odd quotient → up to even' => [1010, 150, 152],
+            'exact half on an even quotient → stays even' => [1030, 150, 154],
+            'zero' => [0, 150, 0],
         ];
     }
 
     #[DataProvider('costProvider')]
-    public function test_calculate_cost_returns_rounded_amount(int $watts, float $pricePerKw, float $expected): void
+    public function test_calculate_cost_returns_amount_in_minor_units(int $watts, int $pricePerKw, int $expected): void
     {
         $this->assertSame($expected, {{EntityName}}::calculateCost($watts, $pricePerKw));
     }

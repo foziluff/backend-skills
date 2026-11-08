@@ -118,12 +118,12 @@ It is kept consistent the senior way, and every new denormalized value must foll
    `transaction()`.
 3. **Under a row lock.** The row holding the value is read with `lockForUpdate` before computing the new value
    (`findById($userId, true)`, `getLockedUsersByIdsKeyed`); never read-modify-write without a lock.
-4. **Computed from the locked value, then rounded** (`round($currentBalance - $intervalCost, 2)`).
+4. **Computed from the locked value** (`$currentBalance - $intervalCost` — integer minor units, exact, no rounding).
 5. **Reconstructible.** It must be possible to recompute the value from the source of truth. Provide a reconciliation
    check (a scheduled read-only comparison that logs mismatches) for every denormalized value. **[proposal]**
    Note: today a session's prepaid interval and `withdrawn_amount` reduce the balance before a final `WITHDRAWAL`
    ledger row exists, so a reconciliation must account for active sessions.
-6. **Documented on the model** as derived (`@property float $balance` + one-line comment naming the source of truth). **[proposal]**
+6. **Documented on the model** as derived (`@property int $balance` + one-line comment naming the source of truth). **[proposal]**
 
 What is never acceptable: updating a copy "later" outside the transaction, in `defer()`, in an event listener, or in two
 different code paths.

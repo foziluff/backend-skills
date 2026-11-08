@@ -54,8 +54,10 @@ tests/
 ## What to test (by priority)
 
 1. **Money flows**: starting and stopping a session, `top-up`, `autoUpdateProgress` — balance after the operation, the
-   `transactions` record, the session status. Assert **exact amounts** (`assertSame(98.5, $user->fresh()->balance)`).
-   Also assert that the denormalized balance agrees with the ledger after the flow.
+   `transactions` record, the session status. Assert **exact amounts in minor units** (`assertSame(9_850, $user->fresh()->balance)`).
+   Also assert that the denormalized balance agrees with the ledger after the flow. `Money::share` against an independent
+   implementation, the end-to-end "everything agrees to the minor unit" test and the `CHECK` test —
+   [data-layer.md](data-layer.md#money-tests).
 2. **Every domain exception of the service**: status + `message` from `lang` (status table in
    [error-handling.md](error-handling.md)). A new exception without a test is an open checklist item.
 3. **Security:** no token → 401; non-admin on an admin route → 403; another user's entity → 404 (ownership);

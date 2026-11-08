@@ -148,7 +148,18 @@ Details: [references/architecture.md](references/architecture.md).
 - The service checks existence of related entities via `existsById($id, true)` inside `transaction()`,
   not with an `exists:` rule in the FormRequest. [hypothesis: race protection + a domain error text]
 - Every read has an explicit `select(...DEFAULT_SELECT_COLUMNS)`; every eager-load uses a closure that selects columns too.
-- Money: `decimal(36, 2)` in the DB, `float` cast in the model, `round(..., 2)` after **every** arithmetic step.
+- **Money — integers in the currency's minor units, never `float`/`decimal`** **[confirmed]** (any project, any currency):
+  1. an amount = an integer count of the smallest coin; 1 major unit = `Money::MINOR_PER_MAJOR` (100 for most currencies);
+  2. one column type for every amount — signed `bigInteger`; a table whose amounts never go negative gets one
+     `CHECK (col >= 0)` named `{table}_money_not_negative` via `DB::statement` right after `Schema::create`;
+  3. model cast `'integer'`, PHPDoc `int`; constants, config and env in minor units (`public const int MIN_BALANCE = 2_000; // 20.00`);
+  4. `+`, `-`, `× quantity` are exact — no `round()` anywhere;
+  5. a share (percent, rate, commission) is rounded once, half to even, only in `Money::share()` / `Money::percent()`;
+  6. API in and out — integer minor units: the Resource returns the cast `int`, the FormRequest `'integer', 'min:0', 'max:'.Money::MAX`;
+  7. people see `Money::format($amount, $locale)`;
+  8. the bank gets `Money::toDecimal()`; a webhook amount is parsed strictly by `Money::fromDecimal()` — not an exact
+     amount → 422 "amount mismatch", never rounded.
+  → [data-layer.md](references/data-layer.md#money)
 - Limits and business constants are typed model constants (`public const int MAX_COUNT = 200;`), no magic numbers.
   (legacy: `>= 100` in `ChargerService::create`)
 - Mass updates: `chunkById` + `upsert`; if a batch fails, fall back to one-by-one processing.
@@ -225,7 +236,7 @@ Details: [references/architecture.md](references/architecture.md).
 - [ ] Every query has `select(...DEFAULT_SELECT_COLUMNS)`; relations via `with([... fn (Relation $q) => $q->select(...)])`.
 - [ ] New model: `$fillable`, `DEFAULT_SELECT_COLUMNS`, `$hidden` (timestamps, `deleted_at`, internal/sensitive fields), `casts()`.
 - [ ] "Check → write" runs inside `transaction()` with `lockForUpdate`.
-- [ ] Money rounded with `round(..., 2)`; money columns `decimal(36, 2)`.
+- [ ] Every money column `bigInteger` (+ `CHECK >= 0` where it never goes negative), `int` in code, shares via `Money::share`, no `float`/`decimal`.
 - [ ] Limits are model constants.
 - [ ] Not a single raw string value (`'admin'`, `'Charging'`, `'Accepted'`, `'UserUpdated'`) — only enums/constants;
       a new column with a fixed set of values = `string` + enum + model cast.
@@ -247,7 +258,7 @@ Details: [references/architecture.md](references/architecture.md).
 
 **Contract**
 - [ ] FormRequest follows the `bail`/`stopOnFirstFailure` policy (form or not); every field has bounds.
-- [ ] Response is a Resource with explicit `(int)/(float)/(bool)`; empty response — `EmptyResource::make()`.
+- [ ] Response is a Resource with explicit `(int)/(float)/(bool)` (money — the `int` from the model cast, never `(float)`); empty response — `EmptyResource::make()`.
 - [ ] Route: kebab-case plural, `->whereNumber('id')`, right group (public / `auth:sanctum` / `role:admin`).
 - [ ] New exceptions: class + `match` line in `bootstrap/app.php` + key in `lang/ru`, `lang/tg`, `lang/en`.
 - [ ] Swagger: `rules()` does not read the request, every rule has a type, the `match` line has the form `$e instanceof X => [Response::HTTP_*, …]`.
@@ -277,7 +288,7 @@ Details: [references/architecture.md](references/architecture.md).
 | `throw new HttpException`/`abort()` for business errors | Only domain classes + the central `match` |
 | An exception without a `match` line and a translation | The user gets a 500 instead of a clear answer |
 | Balance/limit check without `lockForUpdate` | Race of two requests → double charge / limit exceeded |
-| Money arithmetic without `round(..., 2)` | Float error accumulates every interval |
+| Money in `float`/`decimal` (`decimal(36, 2)`, a `float` cast, `round(..., 2)`), or different column types for amounts (`unsignedBigInteger` for some, `bigInteger` for others) | Float error and rounding drift accumulate; one signed integer type in minor units is exact, `CHECK` guards the non-negative ones [confirmed] |
 | Copying a method into two services | DRY always [confirmed] |
 | New queues/Redis/Elastic "just in case" | Solve with the project's own means first [confirmed] |
 | `readonly class` + `private readonly` together | Redundant [confirmed] |

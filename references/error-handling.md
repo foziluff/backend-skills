@@ -123,9 +123,10 @@ Rules:
   `response()->json($model)` and `response()->json()` in `PointController`, `CompanyController`, `ChargerController`, etc. are legacy.
 - **Select first, then the Resource.** The Resource only shapes the contract; extra columns are cut off in the query
   (`DEFAULT_SELECT_COLUMNS`). **[confirmed]**
-- Explicit casts in Resources: `(int) $this->watts`, `(float) $this->balance`, `(bool) $this->is_online`,
-  nullable — `$this->price !== null ? (float) $this->price : null`. *Why:* MySQL decimals arrive as strings, and the client
-  needs a stable type.
+- Explicit casts in Resources: `(int) $this->watts`, `(bool) $this->is_online`. **Money is already `int`** (minor units)
+  from the model's `'integer'` cast and is returned as is: `'balance' => $this->balance`, nullable — `'price' => $this->price`
+  (`int|null`); `(float)` is never applied to money. *Why:* the client needs a stable type, and an amount is an exact integer
+  ([data-layer.md](data-layer.md#money)).
 - Relations in a Resource only via `whenLoaded('relation')`; a Resource never loads anything (no queries outside repositories).
 - Dates are returned as is (Carbon → ISO-8601).
 - **The success status is set by Laravel:** a Resource over a model with `wasRecentlyCreated = true` → `201`, otherwise `200`.

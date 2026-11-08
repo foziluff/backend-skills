@@ -51,7 +51,7 @@ class {{EntityName}} extends Model
     {
         return [
             '{{parent_id}}' => 'integer',
-            // 'price' => 'float',
+            // 'price' => 'integer',   // money: minor units (PHPDoc @property int $price)
             // 'is_active' => 'boolean',
             // 'status' => {{EntityName}}Status::class,   // every fixed-set column is cast to its enum
             // 'started_at' => 'datetime',
@@ -65,8 +65,9 @@ class {{EntityName}} extends Model
 
     // DECISION: domain math is public static, so one formula is shared by the service, the Action and accessors.
     // Accessors compute only from loaded data — no queries, no I/O.
-    // public static function calculateX(int $a, float $b): float
+    // Money is int in minor units: + and × a quantity are exact; a share is rounded once by Money::share (half to even).
+    // public static function calculateCost(int $watts, int $pricePerKw): int
     // {
-    //     return round($a * $b, 2);
+    //     return Money::share($pricePerKw, $watts, 1000);   // a per-kWh rate, watts are watt-hours
     // }
 }

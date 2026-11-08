@@ -12,8 +12,8 @@ Schema::create('charging_sessions', function (Blueprint $table) {
     $table->foreignId('connector_id')->constrained()->cascadeOnDelete();
     $table->string('status');
     $table->unsignedBigInteger('watts_delivered')->default(0);
-    $table->decimal('price_per_kw', 36, 2);
-    $table->decimal('withdrawn_amount', 36, 2)->default(0);
+    $table->bigInteger('price_per_kw');                  // money: minor units, one type for every amount
+    $table->bigInteger('withdrawn_amount')->default(0);
     $table->unsignedTinyInteger('soc')->nullable();
     $table->timestamp('started_at')->nullable();
     $table->timestamps();
@@ -22,6 +22,8 @@ Schema::create('charging_sessions', function (Blueprint $table) {
     $table->index(['user_id', 'status']);
     $table->index(['connector_id', 'status']);
 });
+
+DB::statement('ALTER TABLE charging_sessions ADD CONSTRAINT charging_sessions_money_not_negative CHECK (price_per_kw >= 0 AND withdrawn_amount >= 0)');
 ```
 
 - Anonymous class `return new class extends Migration`; `down()` — `Schema::dropIfExists`.
@@ -30,7 +32,9 @@ Schema::create('charging_sessions', function (Blueprint $table) {
   [hypothesis: before the first stable release the schema is edited in place. **After a release this is forbidden** —
   CI runs `migrate --force` in production, and an edited old migration will not be applied.]
 - FKs: `foreignId()->constrained()->cascadeOnDelete()`.
-- Money `decimal(36, 2)`; energy `unsignedBigInteger` (watt-hours); percentages `unsignedTinyInteger`.
+- Money — signed `bigInteger` in minor units, the one type for every amount; a table whose amounts never go negative gets
+  one `CHECK (col >= 0)` named `{table}_money_not_negative` via `DB::statement` right after `Schema::create` —
+  see [Money](#money). Energy `unsignedBigInteger` (watt-hours); percentages `unsignedTinyInteger`.
 - Statuses/types/roles: a `string` column + a PHP backed enum in `app/Enums`, **never** `$table->enum()`. **[confirmed]**
   *Why:* the set of values lives in code — a new value (role, payment method, status) is one `case`, with no migration and no
   ALTER of a big table in production; one list of values serves validation (`new Enum(...)`), casts and Swagger.
@@ -75,7 +79,7 @@ class Connector extends Model
         return [
             'charger_id' => 'integer',
             'watts' => 'integer',
-            'price_per_kw' => 'float',
+            'price_per_kw' => 'integer',   // money: minor units
             'is_connected' => 'boolean',
         ];
     }
@@ -86,7 +90,7 @@ Mandatory set for a new model:
 2. **`public const array DEFAULT_SELECT_COLUMNS`** — the columns the client needs. For models with `HasTranslations` it also
    lists the translatable fields (`'name'`, `'address'`): the trait uses this list to decide which translations to load.
 3. `$hidden` — `created_at`, `updated_at`, `deleted_at` and internal/sensitive fields (`remote_code`, `meter_start`, `active_session_exists`).
-4. `casts()` with `#[\Override]`: numbers → `integer`/`float`, flags → `boolean`, dates → `datetime`, every fixed-set column → its enum.
+4. `casts()` with `#[\Override]`: numbers → `integer`/`float` (money — always `integer`), flags → `boolean`, dates → `datetime`, every fixed-set column → its enum.
 5. `@property` in PHPDoc for appends, casts and relations (Larastan level 5).
 
 Additionally:
@@ -241,17 +245,121 @@ return transaction(function () use ($data) {
 - Transactions are short: network calls inside a transaction only through `defer()` (they run after the response), except
   when the answer decides the commit (`remoteStartTransaction`: `false` → `OCPPCommandFailedException` → rollback of the charge).
 
+<a id="money"></a>
 ## Money
 
+**Money is an integer number of the currency's minor units — never a `float`, never a `decimal`.** **[confirmed]**
+The rule is universal: any project, any currency.
+
+1. **Unit.** An amount is an integer count of the smallest coin of the currency (cents, tiyin, dirams…).
+   One major unit = `Money::MINOR_PER_MAJOR` (100 for most currencies).
+2. **One column type for every amount — signed `bigInteger`.** Balances and ledgers go negative, so the one type is signed;
+   never an unsigned type for some amounts and a signed one for others. Amounts that never go negative (prices, tariffs,
+   thresholds, order totals, payments) are guarded by the database — one constraint per table right after `Schema::create`:
+   ```php
+   DB::statement('ALTER TABLE products ADD CONSTRAINT products_money_not_negative CHECK (price >= 0 AND (old_price IS NULL OR old_price >= 0))');
+   ```
+   Name: `{table}_money_not_negative`; a nullable column is checked as `(col IS NULL OR col >= 0)`.
+3. **Model.** Cast `'integer'`, PHPDoc type `int`. Constants are `int` in minor units with the major amount in a comment:
+   `public const int MIN_BALANCE = 2_000; // 20.00`. Config and env tariffs are in minor units too.
+4. **Arithmetic is exact.** Addition, subtraction and multiplication by a quantity need no rounding: there is no `round()`
+   anywhere. A float or a decimal never holds an amount, not even in an intermediate variable.
+5. **Rounding only where a share of an amount is taken** — a discount percent, a per-kilometre or per-kWh rate, a commission.
+   Exactly once, in one helper `Money::share($amount, $numerator, $denominator)`, half to even (banker's rounding: an exact
+   half goes to the even neighbour, so errors do not pile up in one direction). `Money::percent($amount, $percent)` =
+   `share($amount, $percent, 100)`.
+6. **API.** Every money field in requests and responses is integer minor units. The Resource returns the `int` from the model
+   cast, no `(float)`. FormRequest: `'integer', 'min:0', 'max:'.Money::MAX`; a fraction, a decimal string, a negative amount
+   or text → 422. Clients divide by `MINOR_PER_MAJOR` only to display, and turn the input "12,5" into `1250` by parsing the
+   string, without a float.
+7. **Display to people** (errors, push, receipts): `Money::format($amount, $locale)` — "12 345,50", in English "12,345.50";
+   whole amounts without ",00".
+8. **Bank.** An outgoing amount is the string `Money::toDecimal($amount)` ("12.50"). An amount from a webhook is parsed
+   strictly by `Money::fromDecimal()`: a third decimal digit, an exponent, an inexact float or a negative amount is not an
+   amount — the payment is not credited and the answer is "amount mismatch" (422), nothing is rounded into a match.
+
+*Why:* integers are exact — sums, refunds and ledger totals agree to the minor unit, with no drift between the balance and
+the ledger and no "0.01 lost" bugs. One signed type means every amount fits every column and every comparison, and
+`CHECK` makes the database itself refuse a negative price. Rounding lives in one place, so a share rounds the same way
+everywhere.
+
+```php
+// app/Support/Money.php
+final class Money
+{
+    public const int MINOR_PER_MAJOR = 100;            // minor units in one major unit (100 for most currencies)
+
+    public const int MAX = 999_999_999_999;            // largest accepted amount (9 999 999 999.99): room for × quantity and shares inside BIGINT
+
+    /** $amount × $numerator / $denominator, rounded once, half to even. */
+    public static function share(int $amount, int $numerator, int $denominator): int
+    {
+        if ($denominator <= 0) {
+            throw new InvalidArgumentException('Money::share: the denominator must be positive');
+        }
+
+        $product = $amount * $numerator;
+        if (! is_int($product)) {                      // PHP silently turns an overflowing int product into a float
+            throw new OverflowException('Money::share: the amount is out of range');
+        }
+
+        $quotient = intdiv($product, $denominator);    // truncated toward zero
+        $remainder = abs($product % $denominator);     // the cut-off part: 0 ≤ remainder < denominator
+        $rest = $denominator - $remainder;             // distance to the next whole unit away from zero
+
+        if ($remainder > $rest || ($remainder === $rest && $quotient % 2 !== 0)) {
+            $quotient += $product < 0 ? -1 : 1;        // more than a half, or exactly a half on an odd quotient → away from zero
+        }
+
+        return $quotient;
+    }
+
+    public static function percent(int $amount, int $percent): int
+    {
+        return self::share($amount, $percent, 100);
+    }
+
+    /** 1234550 → "12 345,50" (ru, tg), "12,345.50" (en); a whole amount without the fraction: 1200 → "12". */
+    public static function format(int $amount, string $locale): string { /* … */ }
+
+    /** For the bank: 1250 → "12.50". Built from integers, never through a float. */
+    public static function toDecimal(int $amount): string { /* … */ }
+
+    /**
+     * Strict parse of a bank amount: "12" → 1200, "12.5" → 1250, "12.50" → 1250.
+     * null when it is not an exact non-negative amount ≤ MAX: "12.505", "1e3", "-1", " 12", an inexact float.
+     */
+    public static function fromDecimal(mixed $value): ?int { /* … */ }
+}
+```
+
+- `share` takes no floats at all: multiplication first, one integer division, one rounding decision.
+- A formula that takes a share is a static model method on top of `Money::share`
+  (`ChargingSession::calculateCost($watts, $pricePerKw)` = `Money::share($pricePerKw, $watts, 1000)`: a per-kWh rate,
+  watts are watt-hours). A formula that only adds or multiplies by a quantity uses plain `+`, `-`, `*`.
+- A webhook amount: `$amount = Money::fromDecimal($payload['amount']);` → `null` or `!== $payment->amount` →
+  `PaymentAmountMismatchException` (422 in the `match`), the payment stays unpaid.
+
+In the charging project:
 - Charging is **prepaid one interval ahead** (`getIntervalCost`); on stop — recalculation and a refund of the difference
-  (`StopChargingSessionAction`: `refundAmount = intervalCost - exactCost`).
-- Every intermediate value is `round(..., 2)`.
+  (`StopChargingSessionAction`: `refundAmount = intervalCost - exactCost`, exact integers).
 - Every final charge is recorded in `transactions` (`TransactionType::WITHDRAWAL`, `TransactionSubType::CHARGING`);
   a top-up is `REPLENISHMENT`.
 - `users.balance` is a denormalized running total — kept consistent by the rules in
   [performance.md](performance.md#denormalization) (one write path, same transaction, row lock, reconstructible).
-- The balance may go negative by one interval on stop — accepted; a new start is checked by `validateUserBalanceForStart`.
-- *Trade-off:* PHP `float` instead of BCMath/integer cents; compensated by `decimal(36, 2)` in the DB and rounding. [hypothesis]
+- The balance may go negative by one interval on stop — accepted (that is why `users.balance` and `transactions.amount`
+  have no `CHECK`); a new start is checked by `validateUserBalanceForStart`.
+- (legacy: the current `electrogo/backend` code still keeps money in decimal columns with a fractional cast and rounds
+  after each step — move a table to minor units when touching it: one migration multiplies by `MINOR_PER_MAJOR` and changes
+  the column, model cast, constants, FormRequest and Resource together.)
+
+### Money tests
+- Amounts in tests are minor units: `assertSame(9_850, $user->fresh()->balance)`.
+- `Money::share` is checked against an independent implementation (BCMath or GMP, in the test only) on random amounts,
+  numerators and denominators, plus the exact halves: `share(5, 1, 2) === 2`, `share(15, 1, 10) === 2`, `share(-5, 1, 2) === -2`.
+- An end-to-end test of a money flow checks that the lines, the total, the discount, the delivery, the DB record and the
+  amount sent to the bank agree to the minor unit.
+- The database rejects `-1` in a column with the `CHECK` (`QueryException`), while the balance can still go below zero.
 
 <a id="validation"></a>
 ## Validation
@@ -277,7 +385,7 @@ class StoreChargingSessionRequest extends FormRequest
   service through repositories inside the transaction. **[confirmed: queries only in repositories]**
 - Every rule has an explicit type token (`integer`, `numeric`, `string`, `boolean`, `array`, `image`): the docs type is built from it.
 - Rules are arrays, in order: `bail` (if used) → `required`/`sometimes`/`present` → `nullable` → type → bounds.
-- **Every field has bounds:** strings `min:1|max:255`, ids `min:1|max:999999999999999`, money `min:0.01|max:99999999.99`,
+- **Every field has bounds:** strings `min:1|max:255`, ids `min:1|max:999999999999999`, money `'integer', 'min:0', 'max:'.Money::MAX` (minor units),
   coordinates `between:-90,90`, arrays `min:1|max:1000`. *Why:* protection against BIGINT overflow, garbage and oversized input (DoS).
 - Formats are specific and anchored: phone `regex:/^\d{9}$/`, time `date_format:H:i`, OTP `size:6`.
 - Enum: `new Enum(AppLanguage::class)`.

@@ -61,7 +61,7 @@ hard read caps (`limit`, a `MAX_*` constant), an index that serves the query.
 **A user action on their own resource:** `auth()->id()` in the controller → service argument → ownership check in the service
 answering `NotFound`; a test that another user's id returns 404.
 
-**Money operation:** `transaction()` + `lockForUpdate` of the user, `round(..., 2)`, a record in `transactions` in the same
+**Money operation:** `transaction()` + `lockForUpdate` of the user, money in integer minor units (`Money::share` for a share), a record in `transactions` in the same
 transaction as the balance change, log-and-rethrow to the `charging` channel, pushes via `MobileCommandRepository` (inside `defer`).
 
 **A stored derived value (denormalization) — only if unavoidable:** one write path, the same transaction as the source of truth,

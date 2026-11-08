@@ -15,7 +15,8 @@ return new class extends Migration
             $table->foreignId('{{parent_id}}')->constrained()->cascadeOnDelete();
 
             // DECISION: column types
-            //   money             → $table->decimal('price', 36, 2);
+            //   money             → $table->bigInteger('price');   // minor units, the one type for every amount;
+            //                       never negative → CHECK (price >= 0) via DB::statement (below)
             //   energy/counter    → $table->unsignedBigInteger('watts');
             //   status/type/role  → $table->string('status');            // + backed enum in app/Enums (templates/enum.stub)
             //                       NEVER $table->enum(): the set of values lives in code, a new value needs no migration
@@ -34,6 +35,10 @@ return new class extends Migration
             // $table->index(['{{parent_id}}', 'id']);
             // $table->index(['status', 'started_at']);
         });
+
+        // DECISION: amounts that never go negative — one CHECK per table (use Illuminate\Support\Facades\DB);
+        // a nullable column → (col IS NULL OR col >= 0). Balances and ledgers that may go negative get no CHECK.
+        // DB::statement('ALTER TABLE {{entity_names}} ADD CONSTRAINT {{entity_names}}_money_not_negative CHECK (price >= 0)');
     }
 
     public function down(): void

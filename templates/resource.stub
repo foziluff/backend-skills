@@ -30,9 +30,9 @@ class {{EntityName}}Resource extends JsonResource
             'id' => $this->id,
             '{{parent_id}}' => $this->{{parent_id}},
             'label' => $this->label,
-            // 'price' => (float) $this->price,
+            // 'price' => $this->price,                 // money: int minor units from the model cast, no (float)
             // 'is_active' => (bool) $this->is_active,
-            // 'nullable_price' => $this->price !== null ? (float) $this->price : null,
+            // 'old_price' => $this->old_price,         // nullable money: int|null from the cast, as is
             // '{{parentName}}' => {{ParentName}}Resource::make($this->whenLoaded('{{parentName}}')),
         ];
     }
