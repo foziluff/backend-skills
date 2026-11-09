@@ -189,8 +189,35 @@ Conventions beyond Pint:
   ) {
   ```
 - **Named arguments** only where positional ones are unclear (migrations: `geometry('coordinates', subtype: 'point', srid: 4326)`).
-- **Comments:** almost none. Only `// TODO` with a reason. The code explains itself through method names
-  (`getAndValidateConnectorForStart`).
+- **Comments: few, and only where the logic is not obvious.** **[confirmed]** The code says *what* it does through
+  method names (`getAndValidateConnectorForStart`); a comment says *why* it is done this way, so that the next person or
+  AI changing this code understands it at once and does not "simplify" it into a bug. Write a comment when:
+  - the **order matters** and breaks if moved (lock before read, `defer` only after commit, refund before status change);
+  - a **business rule or constraint** is not visible in the code (money rounding, a limit from the contract, a tariff rule);
+  - an **external system quirk** is handled (OCPP station sends `Finishing` twice, provider returns 200 with an error body);
+  - a **deliberately non-obvious choice** was made over the obvious one (why raw SQL, why no queue, why no index, why a
+    second query instead of a join);
+  - a **number needs its meaning** (`public const int MIN_BALANCE = 2_000; // 20.00`);
+  - `// TODO` — always with the reason and the condition for removing it.
+
+  Do **not** write: a retelling of the next line, a comment on every method or block, section headers
+  (`// validate`, `// save`), commented-out code, PHPDoc that repeats native types. If a comment is needed to explain
+  *what* a block does — extract it into a well-named private method instead.
+  Form: one or two short lines directly above the line or block they explain.
+  ```php
+  // Lock the user before reading the balance: two parallel starts would both pass the check otherwise.
+  $user = $this->userRepository->findById($authUser->id, true);
+
+  // Station resends StopTransaction after a reconnect; the second one must not refund twice.
+  if ($session->status->value === ChargingSessionStatus::COMPLETED->value) {
+      return;
+  }
+  ```
+  ```php
+  // Get user                      ← retells the code
+  // Check balance                 ← section header
+  // $this->notify($user);         ← commented-out code
+  ```
 - **PHPDoc:** only for the static analyser:
   - `@property` on models for appends, casts and relations (`@property ConnectorStatus $status`, `@property Charger|null $charger`);
   - `@mixin Model` + `@property` on Resources;

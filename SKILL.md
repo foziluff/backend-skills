@@ -206,8 +206,10 @@ Details: [references/architecture.md](references/architecture.md).
   disk `public`) — a constant or an enum. → [conventions.md](references/conventions.md#enum)
 - Enums are stored in the DB as `string`, **not** `$table->enum()`: a new value needs no migration. **[confirmed]**
 - Enum comparison by `->value`: `$session->status->value === ChargingSessionStatus::CHARGING->value`. **[confirmed]**
-- Almost no comments; PHPDoc only for `@property`, `@mixin` and generics (`Collection<int, User>`) for Larastan.
-  → [conventions.md](references/conventions.md)
+- Comments are few and only at non-obvious logic: they explain **why** (order that must not change, hidden business
+  rule, external system quirk, deliberate non-obvious choice), so the next person or AI editing the code gets it at once.
+  No comments that retell the code, no section headers, no commented-out code. PHPDoc only for `@property`, `@mixin` and
+  generics (`Collection<int, User>`) for Larastan. → [conventions.md](references/conventions.md)
 
 ### Tests
 - PHPUnit; Feature tests for every endpoint (happy path + every service exception + access/ownership + validation bounds),

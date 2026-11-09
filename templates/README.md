@@ -1,7 +1,10 @@
 # Templates
 
-Templates are ready to copy: replace the placeholders, go through every `// DECISION:` comment, then delete those comments
-(production code in the project has almost no comments).
+Templates are ready to copy: replace the placeholders, go through every `// DECISION:` comment and every instructional
+comment (layer rules, commented-out example lines), then delete them — they are notes for whoever fills the template,
+not code comments. Keep or write a short *why* comment only where the finished code has logic that is not obvious
+(an order that must not change, a hidden business rule, an external system quirk, a deliberate non-obvious choice),
+so the next person or AI editing it understands it at once (see [conventions.md](../references/conventions.md)).
 
 ## Placeholders
 
