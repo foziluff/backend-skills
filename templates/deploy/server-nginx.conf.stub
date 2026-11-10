@@ -1,0 +1,32 @@
+# {{Project Name}} on the server's nginx: every domain proxies to the web container on 127.0.0.1:{{PORT}} (PORT in .env).
+# Domains are independent: each has its own server block and its own certificate.
+# HTTP only: certbot --nginx adds HTTPS and the http -> https redirect itself. So the server keeps a COPY
+# of this file in sites-available, not a link: certbot edits the copy, and a deploy (git reset) does not touch it.
+# See deploy/README.md.
+# Another domain: a copy of the server block below with its name.
+
+# {{domain}}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{domain}};
+
+    # Uploads carry up to 10 files × 20 MB; the web container caps every other request at 1 MB.
+    client_max_body_size 210m;
+
+    location / {
+        proxy_pass http://127.0.0.1:{{PORT}};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        # Laravel's responses carry a long Link header (preloaded assets): more than the default 4–8 KB.
+        proxy_buffer_size 32k;
+        proxy_buffers 16 16k;
+        proxy_busy_buffers_size 64k;
+    }
+}

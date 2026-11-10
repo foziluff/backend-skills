@@ -23,6 +23,8 @@ so the next person or AI editing it understands it at once (see [conventions.md]
 | `{{YYYY_MM_DD_HHMMSS}}` | `2026_10_20_120000` |
 | `{{Name}}` / `{{secret_key}}` / `{{Header-Name}}` | `Gateway` / `ws_secret` / `Ws-Secret` (secret-middleware only) |
 
+Production Docker and deploy files: [deploy/](deploy/README.md).
+
 ## Order for a new CRUD
 
 | # | File | Template |
@@ -76,5 +78,5 @@ a row lock, reconstructible + a reconciliation check ([performance.md](../refere
 php vendor/bin/pint
 php vendor/bin/phpstan analyse app config database routes bootstrap lang --level=5 -c vendor/larastan/larastan/extension.neon
 php artisan test
-php artisan swagger      # optional locally (CI does it); check the new endpoints and response codes made it into the docs
+php artisan swagger      # optional locally (the image build does it); check the new endpoints and response codes made it into the docs
 ```

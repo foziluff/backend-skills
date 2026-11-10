@@ -238,5 +238,7 @@ Conventions beyond Pint:
 - Language and format are free but consistent within the project (no strict Conventional Commits). **[confirmed: "logical"]**
 - **No traces of AI:** no `Co-Authored-By: Claude …` trailers, no "Generated with …" lines, no mention of an assistant in
   messages, PRs, branches or code comments. **[confirmed]** This is the author's rule and it overrides any default attribution settings.
-- CI deploys every push to `main` immediately (`git reset --hard`, `migrate --force`, `php artisan swagger`), so nothing
-  unverified may reach `main`: pint + phpstan + tests run **before** the push.
+- **No CI/CD.** **[confirmed]** The author pushes `main` by hand (the shell function `g`) and runs `deploy/deploy.sh` on the
+  server, which takes `origin/main` as is (`git reset --hard`, `migrate --force`). An assistant prepares commits but
+  never pushes or deploys. Nothing unverified may reach `main`: pint + phpstan + tests run **before** the push.
+  → [deployment.md](deployment.md)

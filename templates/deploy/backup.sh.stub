@@ -1,0 +1,48 @@
+#!/bin/bash
+# Nightly gzipped dump of the database into /backups (the {{project}}_backups volume).
+#   backup        — wait for 02:00 Asia/Dushanbe (21:00 UTC), dump, repeat; the service's default
+#   backup now    — one dump right away, e.g. `docker compose exec backup backup now`
+# Restore: deploy/README.md.
+set -euo pipefail
+
+: "${DB_HOST:?}" "${DB_DATABASE:?}" "${DB_USERNAME:?}" "${DB_PASSWORD:?}"
+keep_days="${BACKUP_KEEP_DAYS:-30}"
+# The password goes through an option file readable only by this user, not the command line (visible in ps).
+credentials=$(mktemp)
+chmod 600 "$credentials"
+printf '[client]\npassword="%s"\n' "$DB_PASSWORD" > "$credentials"
+trap 'rm -f "$credentials"' EXIT
+
+dump() {
+    local file="/backups/${DB_DATABASE}-$(date -u +%Y-%m-%d_%H%M%S).sql.gz"
+
+    # Written under a temporary name: a half-written dump never looks like a finished one.
+    # Checked explicitly: set -e does not apply inside `dump || …`.
+    if ! mysqldump --defaults-extra-file="$credentials" -h "$DB_HOST" -u "$DB_USERNAME" \
+        --single-transaction --quick --routines --no-tablespaces \
+        "$DB_DATABASE" | gzip > "$file.part"; then
+        rm -f "$file.part"
+        return 1
+    fi
+    mv "$file.part" "$file" || return 1
+    echo "backup: $file ($(du -h "$file" | cut -f1))"
+
+    find /backups -maxdepth 1 -name "${DB_DATABASE}-*.sql.gz" -mtime +"$keep_days" -print -delete
+    find /backups -maxdepth 1 -name '*.part' -mmin +60 -delete
+}
+
+if [ "${1:-}" = "now" ]; then
+    dump
+    exit 0
+fi
+
+while true; do
+    now=$(date -u +%s)
+    next=$(date -u -d "today 21:00" +%s)
+    if [ "$next" -le "$now" ]; then
+        next=$((next + 86400))
+    fi
+    sleep $((next - now))
+    # A failed dump is logged and retried the next night; the loop keeps running.
+    dump || echo "backup: FAILED" >&2
+done

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+# Config, routes, events and views are cached on start: they depend on the server's .env, not on the image.
+if [ "$1" = "php-fpm" ]; then
+    php artisan optimize
+fi
+
+exec "$@"

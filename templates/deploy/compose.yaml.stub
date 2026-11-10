@@ -1,0 +1,105 @@
+# Production: see deploy/README.md. Everything is read from the server's .env (never in git or in the image):
+# PORT — the port on 127.0.0.1 the server's nginx proxies to, DB_* — the database.
+name: {{project}}
+
+services:
+  app:
+    image: {{project}}
+    build:
+      context: .
+      target: app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Only the db service needs the MySQL root password; the app never gets it.
+      DB_ROOT_PASSWORD: ""
+    volumes:
+      - storage:/var/www/html/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  web:
+    image: {{project}}-web
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    ports:
+      # Only on localhost: the server's nginx proxies the domain here and handles HTTPS (deploy/{{project}}.conf).
+      - "127.0.0.1:${PORT:?PORT is not set}:80"
+    depends_on:
+      - app
+    # Through php-fpm into Laravel and the database (/up runs a query): a healthy web means the request path works.
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    logging: *logging
+
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    # Client search is a FULLTEXT ngram index: InnoDB's stopwords ("a", "i", "in", …) would drop every
+    # 2-character token containing them, so names like "Ali" would be unsearchable.
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-ft-enable-stopword=OFF
+      - --ngram-token-size=2
+      # Sized for a 2 GB server shared with other sites: an idle MySQL drops from ~430 MB to ~145 MB.
+      # performance_schema is monitoring nobody reads here (~250 MB); the buffer pool fills only as data
+      # is read and keeps a small team's working set in memory; temptable is capped from 1 GB.
+      - --performance-schema=OFF
+      - --innodb-buffer-pool-size=256M
+      - --max-connections=40
+      - --temptable-max-ram=64M
+      - --innodb-log-buffer-size=8M
+      - --table-open-cache=400
+      - --table-definition-cache=400
+      - --skip-name-resolve
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:?DB_DATABASE is not set}
+      MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is not set}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD is not set}
+    volumes:
+      - db:/var/lib/mysql
+    healthcheck:
+      # ping answers without credentials, so no password ends up on a command line.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    logging: *logging
+
+  # A gzipped dump of the database every night; dumps older than BACKUP_KEEP_DAYS are deleted.
+  backup:
+    image: {{project}}-backup
+    build:
+      context: .
+      target: backup
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+    volumes:
+      - backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *logging
+
+volumes:
+  storage:
+  db:
+  backups:

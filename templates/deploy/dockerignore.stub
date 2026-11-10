@@ -1,0 +1,31 @@
+# .env lives only on the server and reaches the containers through env_file, never through the image.
+.env
+.env.*
+!.env.example
+
+.git
+.github
+.claude
+.idea
+.vscode
+node_modules
+vendor
+deploy
+tests
+test-results
+playwright-report
+
+# A leftover Vite dev-server marker would make the production page load assets from it.
+public/hot
+public/build
+public/storage
+
+bootstrap/cache/*.php
+storage/app/private/*
+storage/app/public/*
+storage/app/*.txt
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/logs/*
+storage/pail

@@ -255,7 +255,8 @@ Schedule::call(function (ChargingSessionService $chargingSessionService) {
 <a id="swagger"></a>
 ## Generated documentation: why the shape of the code matters
 
-After deploy, CI runs `php artisan swagger` (the author's package `foziluff/swagger`) → `public/api-docs.json`, `public/docs.html`.
+`php artisan swagger` (the author's package `foziluff/swagger`) → `public/api-docs.json`, `public/docs.html`. There is no CI:
+in a Docker deploy it belongs in the image build **[proposal]** ([deployment.md](deployment.md#deploydeploysh)).
 The generator **does not use annotations**: it reads routes, reflection and **source code via regular expressions**.
 So some style rules are not taste but a condition for correct documentation:
 

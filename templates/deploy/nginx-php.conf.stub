@@ -1,0 +1,13 @@
+# Hands a request to Laravel's front controller in the app container.
+include fastcgi_params;
+fastcgi_param SCRIPT_FILENAME $realpath_root/index.php;
+fastcgi_param SCRIPT_NAME /index.php;
+fastcgi_param DOCUMENT_ROOT $realpath_root;
+fastcgi_param HTTPS $forwarded_https if_not_empty;
+fastcgi_param HTTP_PROXY "";
+fastcgi_hide_header X-Powered-By;
+fastcgi_read_timeout 120s;
+# Responses carry a long Link header (preloaded assets): more than the default 4–8 KB.
+fastcgi_buffer_size 32k;
+fastcgi_buffers 16 16k;
+fastcgi_pass $php_fpm;

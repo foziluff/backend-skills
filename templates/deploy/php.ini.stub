@@ -1,0 +1,18 @@
+; On top of php.ini-production. Uploads: up to 10 files × 20 MB in one request (matches the 210M location in nginx.conf).
+; DECISION: no uploads → upload_max_filesize = 2M, post_max_size = 8M, and drop the 210M locations.
+upload_max_filesize = 20M
+post_max_size = 210M
+max_file_uploads = 20
+memory_limit = 256M
+expose_php = Off
+date.timezone = Asia/Dushanbe
+
+; The code in the image never changes: no file checks on every request.
+opcache.enable = 1
+opcache.enable_cli = 0
+opcache.memory_consumption = 128
+opcache.interned_strings_buffer = 16
+opcache.max_accelerated_files = 20000
+opcache.validate_timestamps = 0
+realpath_cache_size = 4096K
+realpath_cache_ttl = 600

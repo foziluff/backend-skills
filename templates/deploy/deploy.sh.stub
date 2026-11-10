@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Manual deploy, run on the server: /var/www/{{project}}/deploy/deploy.sh (see deploy/README.md).
+# The new images are built next to the running ones: a failed build or migration leaves the site as it is.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+git fetch origin
+git reset --hard origin/main
+
+# The .env holds secrets and is made by hand: no .env, no deploy.
+if [[ ! -f .env ]]; then
+    echo ".env is missing in $(pwd): create it from .env.example (deploy/README.md)" >&2
+    exit 1
+fi
+env_value() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- | tr -d '"'; }
+if [[ "$(env_value APP_ENV)" != "production" || "$(env_value APP_DEBUG)" != "false" \
+    || -z "$(env_value APP_KEY)" || -z "$(env_value APP_URL)" \
+    || "$(env_value SESSION_SECURE_COOKIE)" != "true" || "$(env_value DB_HOST)" != "db" \
+    || "$(env_value DB_USERNAME)" == "root" ]]; then
+    echo "Refusing to deploy: .env needs APP_ENV=production, APP_DEBUG=false, APP_KEY, APP_URL, SESSION_SECURE_COOKIE=true, DB_HOST=db (the compose service) and a DB_USERNAME other than root." >&2
+    exit 1
+fi
+
+# --pull: the base images (php:8.4-fpm, nginx, mysql) are fetched again, so every deploy picks up their security releases.
+docker compose build --pull
+docker compose pull --ignore-buildable
+
+# `run` starts the database itself and waits for it to be healthy.
+docker compose run --rm app php artisan migrate --force
+docker compose up -d --wait --remove-orphans
+
+# The previous build lost its name to the new one: only this project's untagged images (LABEL project={{project}}).
+docker image prune -f --filter "label=project={{project}}"
+
+echo "Deployed $(git rev-parse --short HEAD)"

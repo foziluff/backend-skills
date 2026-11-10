@@ -1,0 +1,115 @@
+# Inside the web container. Only the server's nginx reaches it (the port is published on 127.0.0.1):
+# the client's address and scheme come from its X-Real-IP and X-Forwarded-Proto.
+# HTTPS and Strict-Transport-Security are the server's nginx (deploy/{{project}}.conf).
+
+map $http_x_forwarded_proto $forwarded_https {
+    https on;
+    default '';
+}
+
+# Rate limits for the unauthenticated entry points; the app adds its own per-account login limit.
+limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=csrf:10m rate=30r/m;
+# Whole API per address: a busy office behind one NAT stays well below it.
+limit_req_zone $binary_remote_addr zone=api:10m rate=20r/s;
+limit_req_status 429;
+
+server {
+    listen 80 default_server;
+    server_name _;
+    root /var/www/html/public;
+    index index.php;
+    charset utf-8;
+    server_tokens off;
+
+    client_max_body_size 1M;
+
+    set_real_ip_from 10.0.0.0/8;
+    set_real_ip_from 172.16.0.0/12;
+    set_real_ip_from 192.168.0.0/16;
+    set_real_ip_from 127.0.0.1;
+    real_ip_header X-Real-IP;
+
+    # Docker's DNS, asked again every 10 s: a recreated app container gets a new address,
+    # and a name resolved once at start would keep pointing at the old one (502).
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $php_fpm app:9000;
+
+    # Repeated in every location that sets its own add_header (nginx does not inherit them).
+    set $csp "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy $csp always;
+
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/json application/javascript image/svg+xml;
+
+    # Vite assets have a hash in the name.
+    location /build/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header X-Content-Type-Options "nosniff" always;
+        access_log off;
+        try_files $uri =404;
+    }
+
+    # DECISION: list the exact upload routes in the 210M location below; delete the location if the project has no uploads.
+    # Every request body is capped at 1M except the upload routes (up to 10 files × 20 MB).
+    # API routes go straight to PHP, so the cap and the rate limits apply to every variant of a path.
+    location ^~ /api/ {
+        limit_req zone=api burst=60 nodelay;
+
+        location ~ ^/api/login/?$ {
+            limit_req zone=api burst=60 nodelay;
+            limit_req zone=login burst=5 nodelay;
+            include snippets/php.conf;
+        }
+
+        location ~ {{upload_routes_regex}} {
+            client_max_body_size 210M;
+            include snippets/php.conf;
+        }
+
+        include snippets/php.conf;
+    }
+
+    # DECISION: keep only if the app serves private files; they are opened by plain links and served by PHP (auth checked).
+    location ^~ /files/ {
+        limit_req zone=api burst=60 nodelay;
+        include snippets/php.conf;
+    }
+
+    location ^~ /sanctum/ {
+        limit_req zone=csrf burst=10 nodelay;
+        include snippets/php.conf;
+    }
+
+    location = /up {
+        access_log off;
+        include snippets/php.conf;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location = /robots.txt  { access_log off; log_not_found off; }
+
+    location ~ ^/index\.php(/|$) {
+        include snippets/php.conf;
+        internal;
+    }
+
+    location ~ \.php$ {
+        return 404;
+    }
+
+    location ~ /\.(?!well-known).* {
+        deny all;
+    }
+}

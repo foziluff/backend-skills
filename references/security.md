@@ -47,7 +47,7 @@ Rules for new code:
 - Give Sanctum tokens a lifetime: `config/sanctum.php` → `'expiration' => null` today (tokens never expire). **[proposal]**
 - **No dev shortcuts in code at all**: no `dev-token` route, no "magic phone gets code 123456"
   (legacy: `UserController::devToken` issues an **admin** token without auth; `UserService::sendCode` bypass for `999999999`).
-  CI deploys `main` as is, so any shortcut ships to production. For local work, use seeders and `php artisan tinker`.
+  Every deploy ships `main` as is, so any shortcut ships to production. For local work, use seeders and `php artisan tinker`.
 - Every authentication-related public endpoint has a `throttle`.
 
 ## 2. Authorization

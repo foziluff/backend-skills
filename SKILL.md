@@ -1,13 +1,13 @@
 ---
 name: foziluff-backend-style
-description: Use when writing, refactoring or reviewing backend code in foziluff's style on PHP 8.3 / Laravel 13 (Octane + Swoole, Sanctum, MySQL) — Controller → Service → dumb Repository layers, domain exceptions, FormRequest, Resource, enums instead of raw strings, transactions with lockForUpdate, millisecond queries at billion-row scale, no denormalization drift, no memory leaks, security in every layer.
+description: Use when writing, refactoring or reviewing backend code in foziluff's style on PHP 8.3–8.4 / Laravel 13 (Octane + Swoole or php-fpm, Sanctum, MySQL) — Controller → Service → dumb Repository layers, domain exceptions, FormRequest, Resource, enums instead of raw strings, transactions with lockForUpdate, millisecond queries at billion-row scale, no denormalization drift, no memory leaks, security in every layer, production Docker (untagged images, manual deploy.sh, no CI/CD, server nginx copy + certbot).
 ---
 
 # foziluff backend style
 
 This skill describes not only *how* the code is written but *why*.
 Source: the real project `electrogo/backend` (EV charging: points, chargers, connectors, charging sessions, balance,
-OCPP gateway).
+OCPP gateway). Production Docker and deploy: the project `mini-crm` (Laravel 13, PHP 8.4, Vue 3/Vite, MySQL 8.4).
 
 Markers used in the text:
 - **[confirmed]** — the author confirmed the decision personally;
@@ -127,11 +127,11 @@ Details: [references/architecture.md](references/architecture.md).
 - The acting user comes only from `auth()` in the controller; the service checks ownership and answers 404 for foreign ids.
 - Services receive only `validated()`; user-facing FormRequests never contain privileged fields (`role`, `balance`).
 - Secrets: only via `config()`, compared with `hash_equals`, fail closed when empty, never in git, URLs or logs.
-- No dev routes, OTP bypasses or debug shortcuts in code — CI deploys `main` as is.
+- No dev routes, OTP bypasses or debug shortcuts in code — every deploy ships `main` as is.
   → [security.md](references/security.md)
 
 ### Documentation (Swagger is generated from source)
-- CI runs `php artisan swagger`: the generator reads **code**, not annotations. Therefore: FormRequest as a parameter type,
+- `php artisan swagger` builds the docs from **code**, not annotations. Therefore: FormRequest as a parameter type,
   `rules()` without access to the request/route/user, an explicit type token in every rule, the service called as
   `$this->xxxService->method(...)`, the mapping line `$e instanceof X => [Response::HTTP_*, ...]` on one line.
   → [architecture.md](references/architecture.md#swagger)
@@ -217,8 +217,25 @@ Details: [references/architecture.md](references/architecture.md).
   `Http::fake()` + `Http::preventStrayRequests()`.
   → [testing.md](references/testing.md)
 
+### Production Docker and deploy → [deployment.md](references/deployment.md)
+- **Images have no tags** **[confirmed]**: `image: {{project}}`, `{{project}}-web`, `{{project}}-backup` — never
+  `:latest`/`:v1.2`/`:sha`. Every deploy rebuilds from the current commit; old images are pruned by
+  `LABEL project={{project}}` on every stage. *Why:* the commit is the version; a tag can disagree with the code.
+- **No CI/CD** **[confirmed]**: deploy is `deploy/deploy.sh`, run by hand on the server; the author pushes `main` by hand
+  (`g`). An assistant never pushes or deploys. *Why:* one server, one person — a pipeline only adds secrets elsewhere
+  and deploys nobody watched.
+- **Server nginx = a copy + `certbot --nginx`** **[confirmed]**: `deploy/{{project}}.conf` (HTTP only, one `server` per
+  domain) is `cp`'d to `sites-available`, never symlinked; certbot adds HTTPS per domain; after a change — copy again and
+  `certbot … --reinstall`. *Why:* certbot edits the file; a link into the repo would be wiped by the next `git reset`.
+- Rollback = `git revert` + `deploy.sh` (urgent: `git reset --hard <commit>` + `build --pull` + `up -d --wait`).
+- Secrets only in the server's `.env` (`env_file`, excluded by `.dockerignore`); `DB_ROOT_PASSWORD` only for `db`.
+- After the first production run migrations are only added, never edited; deploy runs `migrate --force`.
+- One multi-stage Dockerfile (`php` → `vendor` → `assets` → `app` / `web` / `backup`); config cache built on container
+  start; `web` published on `127.0.0.1` only; MySQL sized for a 2 GB server; nightly `mysqldump` from `mysql:8.4`.
+
 ### Git
 - A commit = one logical change with a meaningful message (not `changes`). **[confirmed]**
+- The author pushes by hand; an assistant does not `git push`. **[confirmed]**
 - **No traces of AI in git:** no `Co-Authored-By: Claude…`, no "Generated with…", no mention of an assistant
   in messages, branches, PRs or code. **[confirmed]**
   → [conventions.md](references/conventions.md#git)
@@ -302,7 +319,10 @@ Details: [references/architecture.md](references/architecture.md).
 | `$request->all()`, `$guarded = []`, `forceFill($input)` | Mass assignment of `role`/`balance` [confirmed: security] |
 | `user_id` for ownership taken from the request | IDOR: acting on someone else's data |
 | Secrets compared with `===`, or "empty secret == empty header" | Timing attacks; open door when the env var is missing |
-| Dev routes, OTP bypasses, secrets (`firebase.json`, keys) in the repository | Access leaks to production (CI deploys `main` as is) |
+| Dev routes, OTP bypasses, secrets (`firebase.json`, keys) in the repository | Access leaks to production (every deploy ships `main` as is) |
+| Tagged images (`:latest`, `:v1`), CI/CD pipelines, auto-deploy, an assistant pushing or deploying | Untagged images rebuilt per commit, manual `deploy.sh` [confirmed] |
+| A symlink to the repo's nginx conf, HTTPS written by hand | Copy + `certbot --nginx`; a deploy would wipe certbot's edits [confirmed] |
+| `.env` or secrets in the image, `DB_ROOT_PASSWORD` in `app` | Secrets only in the server's `.env` via `env_file` [confirmed] |
 | Phones, OTP codes, tokens in logs | Personal data / credential leak |
 | `Co-Authored-By`/"Generated with" in commits | No traces of AI in git [confirmed] |
 
@@ -320,6 +340,7 @@ Details: [references/architecture.md](references/architecture.md).
 | Where queries may live, indexes, pagination at scale, denormalization, memory leaks | [references/performance.md](references/performance.md) |
 | Writing a test, setting up the test environment | [references/testing.md](references/testing.md) |
 | Reference code with explanations and anti-examples | [references/examples.md](references/examples.md) |
+| Dockerfile, compose, nginx, php-fpm, deploy.sh, rollback, backups, first launch on a server | [references/deployment.md](references/deployment.md) |
 | Creating a new CRUD/endpoint from scratch | [templates/README.md](templates/README.md) |
 
 ## Order of work on a new feature

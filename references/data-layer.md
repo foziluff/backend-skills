@@ -30,7 +30,8 @@ DB::statement('ALTER TABLE charging_sessions ADD CONSTRAINT charging_sessions_mo
 - **One migration = one table**, in its final form. `add_x_to_y` migrations were folded into the create migration in history
   (e.g. `add_withdrawn_amount_to_charging_sessions_table` was removed on 2026-08-16).
   [hypothesis: before the first stable release the schema is edited in place. **After a release this is forbidden** —
-  CI runs `migrate --force` in production, and an edited old migration will not be applied.]
+  the deploy runs `migrate --force` in production, and an edited old migration will not be applied — see
+  [deployment.md](deployment.md#6-migrations-after-the-first-production-run-only-new-ones).]
 - FKs: `foreignId()->constrained()->cascadeOnDelete()`.
 - Money — signed `bigInteger` in minor units, the one type for every amount; a table whose amounts never go negative gets
   one `CHECK (col >= 0)` named `{table}_money_not_negative` via `DB::statement` right after `Schema::create` —

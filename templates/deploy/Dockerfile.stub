@@ -1,0 +1,58 @@
+# Three images from one commit: `app` (php-fpm with the code), `web` (nginx with the built frontend)
+# and `backup` (MySQL's own mysqldump on a timer). compose.yaml names them {{project}},
+# {{project}}-web and {{project}}-backup.
+
+FROM php:8.4-fpm-trixie AS php
+LABEL project={{project}}
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libicu-dev unzip \
+    && docker-php-ext-install -j"$(nproc)" intl opcache pdo_mysql \
+    && rm -rf /var/lib/apt/lists/*
+RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+COPY docker/php.ini "$PHP_INI_DIR/conf.d/zz-{{project}}.ini"
+COPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/zz-{{project}}.conf
+WORKDIR /var/www/html
+
+FROM php AS vendor
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-interaction --no-scripts --no-autoloader --prefer-dist
+
+FROM node:22-alpine AS assets
+WORKDIR /build
+# DECISION: copy only the files the project has (.npmrc, tsconfig.json, vite.config.js/ts); a backend without a frontend drops this stage.
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --no-audit --no-fund
+COPY vite.config.ts tsconfig.json ./
+COPY resources resources
+COPY public public
+RUN npm run build
+
+FROM php AS app
+COPY --from=vendor /usr/bin/composer /usr/bin/composer
+COPY --from=vendor /var/www/html/vendor vendor
+COPY . .
+COPY --from=assets /build/public/build public/build
+RUN composer dump-autoload --no-dev --optimize --classmap-authoritative \
+    && php artisan package:discover \
+    && rm /usr/bin/composer \
+    && mkdir -p storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs \
+    && chown -R www-data:www-data storage bootstrap/cache
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint
+# www-data's home (/var/www) is not writable: tinker (psysh) keeps its config and history there.
+ENV HOME=/tmp
+USER www-data
+ENTRYPOINT ["entrypoint"]
+CMD ["php-fpm"]
+
+FROM nginx:1.30-alpine AS web
+LABEL project={{project}}
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker/nginx-php.conf /etc/nginx/snippets/php.conf
+COPY --from=app /var/www/html/public /var/www/html/public
+
+# The same MySQL as the db service: Debian's mysqldump is MariaDB's, and MySQL rejects its dumps on restore.
+FROM mysql:8.4 AS backup
+LABEL project={{project}}
+COPY --chmod=755 docker/backup.sh /usr/local/bin/backup
+ENTRYPOINT ["backup"]
